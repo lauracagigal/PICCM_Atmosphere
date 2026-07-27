@@ -3,7 +3,7 @@
 ### Purpose
 Define a new analysis site interactively, pick the right GHCN-Daily station, and pre-download + clean daily **temperature** (`TMIN`/`TMAX`) and **precipitation** (`PRCP`) **once**, so every other notebook — both the air-temperature (`a`/`b`/`c`) and rainfall (`00a`/`00b`/`00c`) notebooks — only loads cached data.
 
-This notebook is **shared** between the two assistants: CIRA (air temperature) and CIndRA (rainfall). It lives one level above both indicator folders, at `notebooks/historical/00_site_setup.ipynb` — a sibling of `notebooks/historical/air_temperature/` and `notebooks/historical/rainfall/`, not inside either one. It replaces the two former per-domain notebooks (`air_temperature/00_site_setup.ipynb` and `rainfall/00_local_site_setup.ipynb`), which no longer exist.
+This notebook is the **shared entry point** for both the rainfall and air-temperature workflows CIndRA covers. It lives one level above both indicator folders, at `notebooks/historical/00_site_setup.ipynb` — a sibling of `notebooks/historical/air_temperature/` and `notebooks/historical/rainfall/`, not inside either one. It replaces the two former per-domain notebooks (`air_temperature/00_site_setup.ipynb` and `rainfall/00_local_site_setup.ipynb`), which no longer exist.
 
 ### Inputs the assistant must collect
 - `country` (free-form; the notebook fuzzy-matches against the GHCN country list).

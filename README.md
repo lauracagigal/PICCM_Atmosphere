@@ -43,4 +43,4 @@ A station may only report one of the two domains — `00_site_setup.ipynb` skips
 
 ## Assistant documentation
 
-See `assistant/` for CIndRA / CIRA training material (role definition, per-notebook skills, functions API). `assistant/skills/site_setup.md` documents the shared `00_site_setup.ipynb` skill used by both assistants; rainfall skills and shared conventions are otherwise the baseline, and air-temperature skills cover the temperature notebooks.
+See `assistant/` for **CIndRA** training material (role definition, per-notebook skills, functions API). CIndRA is the single assistant for this whole repository — both the rainfall and the air-temperature notebooks — so its skills cover both domains, including the shared `assistant/skills/site_setup.md`.

@@ -82,9 +82,9 @@ If a p-value or additional regression statistics are needed and not returned by 
 
 - Canonical repository: **[PICCM_Atmosphere](https://github.com/lauracagigal/PICCM_Atmosphere)**. All paths below are relative to that repository root.
 - `notebooks/historical/00_site_setup.ipynb` — **shared** site setup for both domains, one level above `air_temperature/` and `rainfall/` (not inside either). Site setup, station choice, GHCN download and completeness filtering for both `TMIN`/`TMAX` and `PRCP`; produces one `data/sites/<site_key>.json` plus `data/rainfall/GHCN_<ghcn_station_id>.pkl` and/or `data/air_temp/GHCN_<ghcn_station_id>.pkl`, whichever the station reports. See `assistant/skills/site_setup.md`.
-- `notebooks/historical/rainfall/00a_Total_rainfall.ipynb` — total rainfall, anomalies, seasonal rainfall, ENSO modulation.
-- `notebooks/historical/rainfall/00b_Consecutive_dry_days.ipynb` — dry-day counts and consecutive dry spells.
-- `notebooks/historical/rainfall/00c_Heavy_rainfall.ipynb` — wet-day counts and heavy-rainfall days.
+- `notebooks/historical/rainfall/a_Total_rainfall.ipynb` — total rainfall, anomalies, seasonal rainfall, ENSO modulation.
+- `notebooks/historical/rainfall/b_Consecutive_dry_days.ipynb` — dry-day counts and consecutive dry spells.
+- `notebooks/historical/rainfall/c_Heavy_rainfall.ipynb` — wet-day counts and heavy-rainfall days.
 - `notebooks/historical/air_temperature/a_mean_temperature.ipynb` — annual mean temperature, trend, anomaly vs reference period, ENSO modulation (ONI).
 - `notebooks/historical/air_temperature/b_min_max_temperature.ipynb` — annual minimum/maximum temperature and diurnal range (`diff = TMAX − TMIN`).
 - `notebooks/historical/air_temperature/c_hot_cold_days.ipynb` — hot days (TX90p) and cold nights (TN10p) using 1961–1990 percentile thresholds, plus simple percentile counts.
@@ -123,14 +123,15 @@ If a p-value or additional regression statistics are needed and not returned by 
 - Build the site tag via `build_site_tag(site_name, site_lon, site_lat)`. Example: `palau_PSW00040309` at 7.3367°N, 134.4769°E → `palau_psw00040309_lat7p337_lon134p477`.
 - Figures go to `outputs/figures/<site_tag>/` via `build_site_figures_dir(Path('../../outputs'), ...)`.
 - Tables go to `outputs/tables/<site_tag>/` via `build_site_tables_dir` / `persist_*_outputs`.
-- Canonical filenames — **rainfall** (`R_*` tables/JSON, `F5`/`F6`/`F7` figures):
-  - `00a`: `F5_Rain_accum.png`, `F5_Rain_anom_top10.png`, `F5_Rain_mean_ONI_daily.png`, `F5_Rain_mean_ONI_accum.png`, `F6a_Rain_dry_season.png`, `F6a_Rain_wet_season.png`.
-  - `00b`: `F6a_Number_dry.png`, `F6b_Consecutive_dry.png`.
-  - `00c`: `F7a_Wet_days_1mm.png`, `F7b_Wet_days_95p.png`.
-- Canonical filenames — **air temperature** (`T_*` tables/JSON, `F2`/`F3`/`F4` figures):
-  - `a`: `F2_ST_Mean.png`, `F2_ST_Annomalies_top10.png`.
-  - `b`: `F3_ST_min.html`/`.png`, `F3_ST_max.html`/`.png`, `F3_ST_min_max.html`/`.png`.
-  - `c`: `F4_ST_hot_cold.html`/`.png`, `F4_ST_hot_cold_percentiles.html`/`.png`.
+- Canonical filenames — **rainfall** (`R_*` tables/JSON, `F5`/`F6`/`F7` figures), in `notebooks/historical/rainfall/`:
+  - `a_Total_rainfall.ipynb`: `F5_Rain_accum.png`, `F5_Rain_anom_top10.png`, `F5_Rain_mean_ONI_daily.png`, `F5_Rain_mean_ONI_accum.png`, `F6a_Rain_dry_season.png`, `F6a_Rain_wet_season.png`.
+  - `b_Consecutive_dry_days.ipynb`: `F6a_Number_dry.png`, `F6b_Consecutive_dry.png`.
+  - `c_Heavy_rainfall.ipynb`: `F7a_Wet_days_1mm.png`, `F7b_Wet_days_95p.png`.
+- Canonical filenames — **air temperature** (`T_*` tables/JSON, `F2`/`F3`/`F4` figures), in `notebooks/historical/air_temperature/`:
+  - `a_mean_temperature.ipynb`: `F2_ST_Mean.png`, `F2_ST_Annomalies_top10.png`.
+  - `b_min_max_temperature.ipynb`: `F3_ST_min.html`/`.png`, `F3_ST_max.html`/`.png`, `F3_ST_min_max.html`/`.png`.
+  - `c_hot_cold_days.ipynb`: `F4_ST_hot_cold.html`/`.png`, `F4_ST_hot_cold_percentiles.html`/`.png`.
+- Rainfall and air-temperature notebooks both use bare `a_`/`b_`/`c_` filename prefixes but live in different folders and have different suffixes — always disambiguate by folder or full filename, never by the bare letter alone.
 - Diagnostic filename variant for accumulated rainfall (optional): `F5_Rain_accum_plot_bar_probs_<station_id>_<station_name>.png`.
 - Never write analysis outputs to `data/` (except caches written by `00_site_setup.ipynb`), the notebook directory, or outside the repository.
 - Cached pickle is keyed by **station ID**; figures/tables are keyed by **site tag**.
@@ -165,30 +166,31 @@ Normalise annual totals for unequal daily observation counts:
 
 When plotting: (1) load the cleaned pickle; (2) compute normalised annual accumulated rainfall in mm/year; (3) use `plot_bar_probs` from `ind_setup.plotting`; (4) add the 1961–1990 reference-period mean for context; (5) report trend in **mm/decade** and p-value when available.
 
-### Notebook `00a` — Total rainfall
+### Rainfall `a_Total_rainfall.ipynb` — Total rainfall
 - Anomalies: subtract `datag.loc[ref_start:ref_end].PRCP.mean()`.
 - Seasonal split (Palau convention): dry = months 12–4 + 11; wet = months 5–10.
 - Trends via `plot_bar_probs(..., trendline=True, return_trend=True)` and `plot_timeseries_interactive(..., trendline=True)`.
 - ONI section: join monthly mean `PRCP`, `add_oni_cat`, `plot_bar_probs_ONI`.
 
-### Notebook `00b` — Consecutive dry days
-- Dry day: `PRCP < 1 mm`. Filter years with ≥ 300 observations.
+### Rainfall `b_Consecutive_dry_days.ipynb` — Consecutive dry days
+- Dry day: `PRCP < 1 mm`.
 - `consecutive_dry_days` → annual maximum consecutive dry spell; `count_consecutive_days` → per-day running dry-spell length.
+- Do not re-filter years by observation count here — completeness filtering already happened once in `00_site_setup.ipynb`.
 
-### Notebook `00c` — Heavy rainfall
+### Rainfall `c_Heavy_rainfall.ipynb` — Heavy rainfall
 - Wet day: `PRCP >= 1 mm`. Heavy day: `PRCP > np.percentile(PRCP.dropna(), 95)`.
-- Filter years with ≥ 300 observations.
+- Do not re-filter years by observation count here — completeness filtering already happened once in `00_site_setup.ipynb`.
 
-### Notebook `a` — Mean temperature
+### Air temperature `a_mean_temperature.ipynb` — Mean temperature
 - Annual aggregation: `st_data.resample('YE').mean()`.
 - Anomalies: `mean_ref = st_data.loc[ref_start:ref_end].TMEAN.mean()`; `st_data['TMEAN_ref'] = st_data['TMEAN'] - mean_ref`. Highlight the top-10 warmest years.
 - ENSO: resample station data to monthly (`st_data_daily.resample('M').mean()`), join `df_oni['tmin']`/`df_oni['tmax']`, `add_oni_cat` + `plot_bar_probs_ONI`.
 
-### Notebook `b` — Min/max temperature
+### Air temperature `b_min_max_temperature.ipynb` — Min/max temperature
 - Annual aggregation of daily `TMIN`/`TMAX`; combined min/max figure must share a y-axis so trend magnitudes are comparable.
 - Diurnal range: `diff = TMAX − TMIN`, trended the same way.
 
-### Notebook `c` — Hot days & cold nights
+### Air temperature `c_hot_cold_days.ipynb` — Hot days & cold nights
 - TX90p: `exceedance_rate_for_outbase_period(st_data, "TMAX")` for the per-calendar-day 90th-percentile threshold over 1961–1990; TN10p uses `"TMIN"` and the 10th percentile.
 - Apply thresholds by joining on the `DAY` calendar-day key (`pd.to_datetime("2024-" + DATE.strftime('%m-%d'))`).
 - Report annual hot-day/cold-night counts in **days/year** and as a percentage anomaly relative to the base-period mean.
@@ -292,12 +294,12 @@ Examples:
 For step-by-step notebook workflows, see:
 
 - `assistant/skills/site_setup.md` — `notebooks/historical/00_site_setup.ipynb` (shared by both domains)
-- `assistant/skills/total_rainfall.md` — `00a_Total_rainfall.ipynb`
-- `assistant/skills/consecutive_dry_days.md` — `00b_Consecutive_dry_days.ipynb`
-- `assistant/skills/heavy_rainfall.md` — `00c_Heavy_rainfall.ipynb`
-- `assistant/skills/mean_temperature.md` — `a_mean_temperature.ipynb`
-- `assistant/skills/min_max_temperature.md` — `b_min_max_temperature.ipynb`
-- `assistant/skills/hot_cold_days.md` — `c_hot_cold_days.ipynb`
+- `assistant/skills/total_rainfall.md` — `rainfall/a_Total_rainfall.ipynb`
+- `assistant/skills/consecutive_dry_days.md` — `rainfall/b_Consecutive_dry_days.ipynb`
+- `assistant/skills/heavy_rainfall.md` — `rainfall/c_Heavy_rainfall.ipynb`
+- `assistant/skills/mean_temperature.md` — `air_temperature/a_mean_temperature.ipynb`
+- `assistant/skills/min_max_temperature.md` — `air_temperature/b_min_max_temperature.ipynb`
+- `assistant/skills/hot_cold_days.md` — `air_temperature/c_hot_cold_days.ipynb`
 - `assistant/skills/functions_api.md` — full function reference and discovery workflow
 - `assistant/skills/data_sources.md` — sources, units, citations
 - `assistant/skills/output_conventions.md` — figure names and folders
@@ -309,7 +311,7 @@ For step-by-step notebook workflows, see:
 ## Skill: Site Setup (notebook `notebooks/historical/00_site_setup.ipynb`)
 
 ### Purpose
-Define a new analysis site interactively, pick the right GHCN-Daily station, and pre-download + clean daily **temperature** (`TMIN`/`TMAX`) and **precipitation** (`PRCP`) **once**, so every other notebook — both the air-temperature (`a`/`b`/`c`) and rainfall (`00a`/`00b`/`00c`) notebooks — only loads cached data.
+Define a new analysis site interactively, pick the right GHCN-Daily station, and pre-download + clean daily **temperature** (`TMIN`/`TMAX`) and **precipitation** (`PRCP`) **once**, so every other notebook — both the air-temperature (`a_mean_temperature.ipynb`, `b_min_max_temperature.ipynb`, `c_hot_cold_days.ipynb`) and rainfall (`a_Total_rainfall.ipynb`, `b_Consecutive_dry_days.ipynb`, `c_Heavy_rainfall.ipynb`) notebooks — only loads cached data.
 
 This notebook is the **shared entry point** for both the rainfall and air-temperature workflows CIndRA covers. It lives one level above both indicator folders, at `notebooks/historical/00_site_setup.ipynb` — a sibling of `notebooks/historical/air_temperature/` and `notebooks/historical/rainfall/`, not inside either one. It replaces the two former per-domain notebooks (`air_temperature/00_site_setup.ipynb` and `rainfall/00_local_site_setup.ipynb`), which no longer exist.
 
@@ -348,7 +350,7 @@ Before asking the user to pick a `country`/station, or before setting `site_key`
 ### Common follow-up actions
 - Confirm which station was selected, its coordinates, and which variables (`TMIN`/`TMAX`/`PRCP`) were actually downloaded — a station may only report one domain.
 - If the station record is short or has large gaps, warn the user before running any downstream notebook.
-- After saving the config, recommend opening `notebooks/historical/air_temperature/a_mean_temperature.ipynb` and/or `notebooks/historical/rainfall/00a_Total_rainfall.ipynb` next, depending on which variables are available.
+- After saving the config, recommend opening `notebooks/historical/air_temperature/a_mean_temperature.ipynb` and/or `notebooks/historical/rainfall/a_Total_rainfall.ipynb` next, depending on which variables are available.
 
 ### Hard rules
 
@@ -363,7 +365,7 @@ Before asking the user to pick a `country`/station, or before setting `site_key`
 
 <!-- SOURCE: assistant/skills/total_rainfall.md -->
 
-## Skill: Total Rainfall (notebook `notebooks/historical/rainfall/00a_Total_rainfall.ipynb`)
+## Skill: Total Rainfall (notebook `notebooks/historical/rainfall/a_Total_rainfall.ipynb`)
 
 ### Purpose
 Quantify annual accumulated precipitation, daily extremes, seasonal totals, and ENSO modulation at the site's GHCN station. Report anomalies relative to the reference period from the site config.
@@ -432,7 +434,7 @@ Always include: station ID and name, data source (GHCN-Daily), analysis window, 
 
 <!-- SOURCE: assistant/skills/consecutive_dry_days.md -->
 
-## Skill: Consecutive Dry Days (notebook `00b_Consecutive_dry_days.ipynb`)
+## Skill: Consecutive Dry Days (notebook `rainfall/b_Consecutive_dry_days.ipynb`)
 
 ### Purpose
 Quantify dry-day frequency and consecutive dry spells at the site's GHCN station. Dry conditions are a key drought / water-stress indicator for Pacific Island sites.
@@ -446,7 +448,8 @@ Quantify dry-day frequency and consecutive dry spells at the site's GHCN station
 - **Wet day**: `PRCP > 1 mm`.
 - **Consecutive dry days (annual max)**: longest run of dry days within each year, via `consecutive_dry_days` applied per year.
 - **Running consecutive dry days**: per-day count of the current dry spell via `count_consecutive_days` on `PRCP < threshold`.
-- **Year filter**: keep years with ≥ 300 daily observations (`groupby(year).filter(lambda x: len(x) >= 300)`).
+
+Month/year completeness filtering is applied **once**, in the shared `00_site_setup.ipynb`, before the pickle is cached — do not re-filter years by observation count in this notebook.
 
 ### Workflow
 1. Load config and cached `PRCP` data. Build `site_figures_dir`.
@@ -457,7 +460,6 @@ Quantify dry-day frequency and consecutive dry spells at the site's GHCN station
    - Annual count of dry days (`wet_day_t == 0`) → `plot_bar_probs(..., trendline=True, return_trend=True)` → glue `number_dry_days`, save `F6a_Number_dry.png`.
    - Multiply returned trend by 10 to report **days/decade**.
 5. **Consecutive dry days**:
-   - Filter to years with ≥ 300 days.
    - `data['dry_day'] = np.where(PRCP < threshold, 1, 0)`.
    - `consecutive_dry_days` per year (annual maximum spell).
    - `count_consecutive_days` on `PRCP < threshold` for per-day running counts.
@@ -488,7 +490,7 @@ Use `plot_bar_probs` from `ind_setup.plotting` for all published bar charts. Imp
 
 <!-- SOURCE: assistant/skills/heavy_rainfall.md -->
 
-## Skill: Heavy Rainfall (notebook `00c_Heavy_rainfall.ipynb`)
+## Skill: Heavy Rainfall (notebook `rainfall/c_Heavy_rainfall.ipynb`)
 
 ### Purpose
 Quantify wet-day frequency and extreme (heavy) rainfall days at the site's GHCN station.
@@ -500,21 +502,21 @@ Quantify wet-day frequency and extreme (heavy) rainfall days at the site's GHCN 
 ### Key definitions
 - **Wet day**: `PRCP >= 1 mm` (days above the 1 mm threshold).
 - **Heavy rainfall day**: `PRCP` above the **95th percentile** of the full record (`np.percentile(PRCP.dropna(), 95)`), rounded to 2 decimals. For Koror this is typically ~45.7 mm.
-- **Year filter**: keep years with ≥ 300 daily observations.
+
+Month/year completeness filtering is applied **once**, in the shared `00_site_setup.ipynb`, before the pickle is cached — do not re-filter years by observation count in this notebook.
 
 ### Workflow
-1. Load config and cached data. Build `site_figures_dir`.
-2. Filter years with ≥ 300 observations. Glue `n_years`.
-3. Classify wet/dry (`wet_day` flag at 1 mm). Exploratory distribution plot.
-4. **Wet days (> 1 mm)**:
+1. Load config and cached data (already `.dropna()`'d for completeness). Build `site_figures_dir`. Glue `n_years`.
+2. Classify wet/dry (`wet_day` flag at 1 mm). Exploratory distribution plot.
+3. **Wet days (> 1 mm)**:
    - Annual count of wet days → `plot_bar_probs(..., trendline=True, return_trend=True)` → glue `number_wet_days`, save `F7a_Wet_days_1mm.png`.
    - Multiply returned trend by 10 to report **days/decade**.
    - Keep copy `data_th_1mm` for the summary table.
-5. **Heavy rainfall days (95th percentile)**:
+4. **Heavy rainfall days (95th percentile)**:
    - `threshold = round(np.percentile(data['PRCP'].dropna(), 95), 2)`.
    - Annual count of days above threshold → `plot_bar_probs` → glue `number_over_95`, save `F7b_Wet_days_95p.png`.
    - Keep copy `data_th_95` for the summary table.
-6. **Summary table**: `table_rain_23` via `style_matrix`. Persist via `persist_heavy_rainfall_outputs`.
+5. **Summary table**: `table_rain_23` via `style_matrix`. Persist via `persist_heavy_rainfall_outputs`.
 
 ### Function discovery
 Use `plot_bar_probs` from `ind_setup.plotting` for all published bar charts. Import via `sys.path` to `indicators_setup` or clone from <https://github.com/lauracagigal/indicators_setup> if missing. See `functions_api.md`.
@@ -807,12 +809,12 @@ Both modules implement the **same** site-config API (identical code); either one
 **`air_temp.py`-only**
 - `haversine_km(lon1, lat1, lon2, lat2)` → great-circle distance, used in `00_site_setup.ipynb` to rank nearby GHCN stations.
 
-**Rainfall-specific (`rainfall.py`), dry-spell metrics** (notebook `00b`)
+**Rainfall-specific (`rainfall.py`), dry-spell metrics** (notebook `b_Consecutive_dry_days.ipynb`)
 - `consecutive_dry_days(series)` → maximum consecutive dry days in a boolean series.
 - `count_consecutive_days(series)` → running count of consecutive dry days.
 
 **Persist helpers**
-- `rainfall.py`: `persist_total_rainfall_outputs(...)` (`00a`: CSVs + `R_mean_summary_metrics_*.json`), `persist_dry_days_outputs(...)` (`00b`: CSVs + `R_dry_summary_metrics_*.json`), `persist_heavy_rainfall_outputs(...)` (`00c`: CSVs + `R_heavy_summary_metrics_*.json`).
+- `rainfall.py`: `persist_total_rainfall_outputs(...)` (`a_Total_rainfall.ipynb`: CSVs + `R_mean_summary_metrics_*.json`), `persist_dry_days_outputs(...)` (`b_Consecutive_dry_days.ipynb`: CSVs + `R_dry_summary_metrics_*.json`), `persist_heavy_rainfall_outputs(...)` (`c_Heavy_rainfall.ipynb`: CSVs + `R_heavy_summary_metrics_*.json`).
 - `air_temp.py`: `persist_mean_temperature_outputs(...)` (`a`: CSVs + `T_mean_summary_metrics_*.json`), `persist_minmax_temperature_outputs(...)` (`b`: CSVs + `T_minmax_summary_metrics_*.json`), `persist_hot_cold_outputs(...)` (`c`: CSVs + `T_hot_cold_summary_metrics_*.json`).
 
 ---
@@ -893,21 +895,21 @@ outputs/
 
 | Notebook | Base name | Format |
 |---|---|---|
-| `00a` | `F5_Rain_daily` | `.html` (plotly) |
-| `00a` | `F5_Rain_annual_max` | `.html` (plotly) |
-| `00a` | `F5_Rain_accum` | `.png` (via `plot_bar_probs`) |
-| `00a` | `F5_Rain_anom_top10` | `.png` |
-| `00a` | `F6a_Rain_dry_season` | `.png` |
-| `00a` | `F6a_Rain_wet_season` | `.png` |
-| `00a` | `F5_Rain_mean_ONI_daily` | `.png` |
-| `00a` | `F5_Rain_mean_ONI_accum` | `.png` |
-| `00b` | `F6a_Wet_dry_distribution` | `.png` |
-| `00b` | `F6a_Number_dry` | `.png` |
-| `00b` | `F6b_Mean_consecutive_dry` | `.png` |
-| `00b` | `F6b_Consecutive_dry` | `.png` |
-| `00c` | `F7a_Wet_dry_distribution` | `.png` |
-| `00c` | `F7a_Wet_days_1mm` | `.png` |
-| `00c` | `F7b_Wet_days_95p` | `.png` |
+| `a_Total_rainfall.ipynb` | `F5_Rain_daily` | `.html` (plotly) |
+| `a_Total_rainfall.ipynb` | `F5_Rain_annual_max` | `.html` (plotly) |
+| `a_Total_rainfall.ipynb` | `F5_Rain_accum` | `.png` (via `plot_bar_probs`) |
+| `a_Total_rainfall.ipynb` | `F5_Rain_anom_top10` | `.png` |
+| `a_Total_rainfall.ipynb` | `F6a_Rain_dry_season` | `.png` |
+| `a_Total_rainfall.ipynb` | `F6a_Rain_wet_season` | `.png` |
+| `a_Total_rainfall.ipynb` | `F5_Rain_mean_ONI_daily` | `.png` |
+| `a_Total_rainfall.ipynb` | `F5_Rain_mean_ONI_accum` | `.png` |
+| `b_Consecutive_dry_days.ipynb` | `F6a_Wet_dry_distribution` | `.png` |
+| `b_Consecutive_dry_days.ipynb` | `F6a_Number_dry` | `.png` |
+| `b_Consecutive_dry_days.ipynb` | `F6b_Mean_consecutive_dry` | `.png` |
+| `b_Consecutive_dry_days.ipynb` | `F6b_Consecutive_dry` | `.png` |
+| `c_Heavy_rainfall.ipynb` | `F7a_Wet_dry_distribution` | `.png` |
+| `c_Heavy_rainfall.ipynb` | `F7a_Wet_days_1mm` | `.png` |
+| `c_Heavy_rainfall.ipynb` | `F7b_Wet_days_95p` | `.png` |
 
 Optional diagnostic filename for accumulated rainfall: `F5_Rain_accum_plot_bar_probs_<station_id>_<station_name>.png`.
 
@@ -915,20 +917,20 @@ Optional diagnostic filename for accumulated rainfall: `F5_Rain_accum_plot_bar_p
 
 | Notebook | Base name | Format |
 |---|---|---|
-| `a` | `F2_ST_Mean` | `.png` (via `plot_bar_probs`) |
-| `a` | `F2_ST_Annomalies_top10` | `.png` |
-| `b` | `F3_ST_min` | `.html` + `.png` (via `plot_timeseries_interactive`) |
-| `b` | `F3_ST_max` | `.html` + `.png` |
-| `b` | `F3_ST_min_max` | `.html` + `.png` |
-| `c` | `F4_ST_hot_cold` | `.html` + `.png` |
-| `c` | `F4_ST_hot_cold_percentiles` | `.html` + `.png` |
+| `a_mean_temperature.ipynb` | `F2_ST_Mean` | `.png` (via `plot_bar_probs`) |
+| `a_mean_temperature.ipynb` | `F2_ST_Annomalies_top10` | `.png` |
+| `b_min_max_temperature.ipynb` | `F3_ST_min` | `.html` + `.png` (via `plot_timeseries_interactive`) |
+| `b_min_max_temperature.ipynb` | `F3_ST_max` | `.html` + `.png` |
+| `b_min_max_temperature.ipynb` | `F3_ST_min_max` | `.html` + `.png` |
+| `c_hot_cold_days.ipynb` | `F4_ST_hot_cold` | `.html` + `.png` |
+| `c_hot_cold_days.ipynb` | `F4_ST_hot_cold_percentiles` | `.html` + `.png` |
 
 Save matplotlib: `plt.savefig(site_figures_dir / build_output_filename(...), dpi=300, bbox_inches='tight')`.
 Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='html'))` and, where applicable, `fig.write_image(site_figures_dir / build_output_filename(...))`.
 
 ### Canonical table / JSON filenames — rainfall (`R_*` prefix)
 
-**Notebook `00a`** (`persist_total_rainfall_outputs`):
+**Notebook `a_Total_rainfall.ipynb`** (`persist_total_rainfall_outputs`):
 - `R_mean_annual_<site_tag>.csv`
 - `R_mean_summary_table_<site_tag>.csv`
 - `R_top10_wettest_years_<site_tag>.csv`
@@ -937,14 +939,14 @@ Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='
 - `R_ONI_annual_<site_tag>.csv`
 - `R_mean_summary_metrics_<site_tag>.json`
 
-**Notebook `00b`** (`persist_dry_days_outputs`):
+**Notebook `b_Consecutive_dry_days.ipynb`** (`persist_dry_days_outputs`):
 - `R_dry_days_per_year_<site_tag>.csv`
 - `R_consecutive_dry_max_per_year_<site_tag>.csv`
 - `R_consecutive_dry_mean_per_year_<site_tag>.csv`
 - `R_dry_summary_table_<site_tag>.csv`
 - `R_dry_summary_metrics_<site_tag>.json`
 
-**Notebook `00c`** (`persist_heavy_rainfall_outputs`):
+**Notebook `c_Heavy_rainfall.ipynb`** (`persist_heavy_rainfall_outputs`):
 - `R_wet_days_per_year_<site_tag>.csv`
 - `R_heavy_days_per_year_<site_tag>.csv`
 - `R_heavy_summary_table_<site_tag>.csv`
@@ -952,7 +954,7 @@ Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='
 
 ### Canonical table / JSON filenames — air temperature (`T_*` prefix)
 
-**Notebook `a`** (`persist_mean_temperature_outputs`):
+**Notebook `a_mean_temperature.ipynb`** (`persist_mean_temperature_outputs`):
 - `T_mean_annual_<site_tag>.csv`
 - `T_mean_summary_table_<site_tag>.csv`
 - `T_mean_top10_warmest_years_<site_tag>.csv`
@@ -960,12 +962,12 @@ Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='
 - `ENSO_temperature_summary_<site_tag>.csv`
 - `T_mean_summary_metrics_<site_tag>.json`
 
-**Notebook `b`** (`persist_minmax_temperature_outputs`):
+**Notebook `b_min_max_temperature.ipynb`** (`persist_minmax_temperature_outputs`):
 - `T_minmax_annual_<site_tag>.csv`
 - `T_minmax_summary_table_<site_tag>.csv`
 - `T_minmax_summary_metrics_<site_tag>.json`
 
-**Notebook `c`** (`persist_hot_cold_outputs`):
+**Notebook `c_hot_cold_days.ipynb`** (`persist_hot_cold_outputs`):
 - `T_hot_days_per_year_<site_tag>.csv`
 - `T_cold_nights_per_year_<site_tag>.csv`
 - `T_hot_cold_summary_table_etccdi_<site_tag>.csv`
@@ -997,7 +999,7 @@ Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='
 - **Documentation**: `https://www.ncei.noaa.gov/data/global-historical-climatology-network-daily/doc/GHCND_documentation.pdf`.
 - **Citation**: Menne, M.J., I. Durre, R.S. Vose, B.E. Gleason, and T.G. Houston, 2012. *An overview of the Global Historical Climatology Network-Daily Database.* J. Atmos. Oceanic Technol., 29, 897-910.
 
-### ENSO — NOAA ONI (rainfall notebook `00a` and temperature notebook `a`)
+### ENSO — NOAA ONI (rainfall `a_Total_rainfall.ipynb` and temperature `a_mean_temperature.ipynb`)
 
 - **URL**: `https://psl.noaa.gov/data/correlation/oni.data`.
 - **Format**: monthly Niño 3.4 anomalies. `-99.9` → NaN (`download_oni_index`).
@@ -1019,7 +1021,7 @@ Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='
 1. **Download** — concat requested variables, `dropna()`. Temperature additionally derives `TMEAN`/`diff` when both `TMIN` and `TMAX` are present.
 2. **Completeness filter** — `filter_by_time_completeness` with `month_threshold = year_threshold = completeness_threshold` (default 0.75), applied independently to the temperature pickle and the rainfall pickle. Months with < 75% of calendar days observed are dropped; years with < 75% of valid months are dropped.
 
-Rainfall notebooks `00b` and `00c` additionally filter to years with ≥ 300 daily observations before consecutive-dry and heavy-rainfall metrics.
+Rainfall notebooks `b_Consecutive_dry_days.ipynb` and `c_Heavy_rainfall.ipynb` do not apply any additional per-notebook completeness filter — the shared `00_site_setup.ipynb` filter is the only one.
 
 ### Hard rules
 
@@ -1045,9 +1047,9 @@ This folder holds the instructions used to train an external assistant — **CIn
 | File | Notebook / scope |
 |---|---|
 | `site_setup.md` | `notebooks/historical/00_site_setup.ipynb` — shared entry point for both domains; not under `rainfall/` or `air_temperature/` |
-| `total_rainfall.md` | `rainfall/00a_Total_rainfall.ipynb` |
-| `consecutive_dry_days.md` | `rainfall/00b_Consecutive_dry_days.ipynb` |
-| `heavy_rainfall.md` | `rainfall/00c_Heavy_rainfall.ipynb` |
+| `total_rainfall.md` | `rainfall/a_Total_rainfall.ipynb` |
+| `consecutive_dry_days.md` | `rainfall/b_Consecutive_dry_days.ipynb` |
+| `heavy_rainfall.md` | `rainfall/c_Heavy_rainfall.ipynb` |
 | `mean_temperature.md` | `air_temperature/a_mean_temperature.ipynb` |
 | `min_max_temperature.md` | `air_temperature/b_min_max_temperature.ipynb` |
 | `hot_cold_days.md` | `air_temperature/c_hot_cold_days.ipynb` |
@@ -1058,7 +1060,7 @@ This folder holds the instructions used to train an external assistant — **CIn
 ## Repository quick map
 
 - `notebooks/historical/00_site_setup.ipynb` — single shared entry point; run before anything under `rainfall/` or `air_temperature/`.
-- `notebooks/historical/rainfall/` (`00a`, `00b`, `00c`) and `notebooks/historical/air_temperature/` (`a`, `b`, `c`) — the two indicator-specific analysis folders, both in CIndRA's scope.
+- `notebooks/historical/rainfall/` (`a_Total_rainfall.ipynb`, `b_Consecutive_dry_days.ipynb`, `c_Heavy_rainfall.ipynb`) and `notebooks/historical/air_temperature/` (`a_mean_temperature.ipynb`, `b_min_max_temperature.ipynb`, `c_hot_cold_days.ipynb`) — the two indicator-specific analysis folders, both in CIndRA's scope. Both use bare `a_`/`b_`/`c_` filename prefixes but live in different folders — disambiguate by folder or full filename, not by the bare letter.
 - `functions/` — `rainfall.py` and `air_temp.py` (near-identical site-config API: `save_site_config`, `load_site_config`, `site_config_filename`, `list_available_sites`, `build_site_tag`, ...) plus `temp_func.py` (ETCCDI percentile helpers) and `data_downloaders.py` (GHCN, ONI, completeness filter).
 - `data/rainfall/` — cached per-station GHCN pickles for `PRCP` (`GHCN_<station_id>.pkl`) and optional ONI cache.
 - `data/air_temp/` — cached per-station GHCN pickles for `TMIN`/`TMAX`.

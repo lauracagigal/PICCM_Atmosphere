@@ -1,7 +1,7 @@
 ## Skill: Site Setup (notebook `notebooks/historical/00_site_setup.ipynb`)
 
 ### Purpose
-Define a new analysis site interactively, pick the right GHCN-Daily station, and pre-download + clean daily **temperature** (`TMIN`/`TMAX`) and **precipitation** (`PRCP`) **once**, so every other notebook — both the air-temperature (`a`/`b`/`c`) and rainfall (`00a`/`00b`/`00c`) notebooks — only loads cached data.
+Define a new analysis site interactively, pick the right GHCN-Daily station, and pre-download + clean daily **temperature** (`TMIN`/`TMAX`) and **precipitation** (`PRCP`) **once**, so every other notebook — both the air-temperature (`a_mean_temperature.ipynb`, `b_min_max_temperature.ipynb`, `c_hot_cold_days.ipynb`) and rainfall (`a_Total_rainfall.ipynb`, `b_Consecutive_dry_days.ipynb`, `c_Heavy_rainfall.ipynb`) notebooks — only loads cached data.
 
 This notebook is the **shared entry point** for both the rainfall and air-temperature workflows CIndRA covers. It lives one level above both indicator folders, at `notebooks/historical/00_site_setup.ipynb` — a sibling of `notebooks/historical/air_temperature/` and `notebooks/historical/rainfall/`, not inside either one. It replaces the two former per-domain notebooks (`air_temperature/00_site_setup.ipynb` and `rainfall/00_local_site_setup.ipynb`), which no longer exist.
 
@@ -40,7 +40,7 @@ Before asking the user to pick a `country`/station, or before setting `site_key`
 ### Common follow-up actions
 - Confirm which station was selected, its coordinates, and which variables (`TMIN`/`TMAX`/`PRCP`) were actually downloaded — a station may only report one domain.
 - If the station record is short or has large gaps, warn the user before running any downstream notebook.
-- After saving the config, recommend opening `notebooks/historical/air_temperature/a_mean_temperature.ipynb` and/or `notebooks/historical/rainfall/00a_Total_rainfall.ipynb` next, depending on which variables are available.
+- After saving the config, recommend opening `notebooks/historical/air_temperature/a_mean_temperature.ipynb` and/or `notebooks/historical/rainfall/a_Total_rainfall.ipynb` next, depending on which variables are available.
 
 ### Hard rules
 

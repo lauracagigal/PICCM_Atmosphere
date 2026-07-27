@@ -30,21 +30,21 @@ outputs/
 
 | Notebook | Base name | Format |
 |---|---|---|
-| `00a` | `F5_Rain_daily` | `.html` (plotly) |
-| `00a` | `F5_Rain_annual_max` | `.html` (plotly) |
-| `00a` | `F5_Rain_accum` | `.png` (via `plot_bar_probs`) |
-| `00a` | `F5_Rain_anom_top10` | `.png` |
-| `00a` | `F6a_Rain_dry_season` | `.png` |
-| `00a` | `F6a_Rain_wet_season` | `.png` |
-| `00a` | `F5_Rain_mean_ONI_daily` | `.png` |
-| `00a` | `F5_Rain_mean_ONI_accum` | `.png` |
-| `00b` | `F6a_Wet_dry_distribution` | `.png` |
-| `00b` | `F6a_Number_dry` | `.png` |
-| `00b` | `F6b_Mean_consecutive_dry` | `.png` |
-| `00b` | `F6b_Consecutive_dry` | `.png` |
-| `00c` | `F7a_Wet_dry_distribution` | `.png` |
-| `00c` | `F7a_Wet_days_1mm` | `.png` |
-| `00c` | `F7b_Wet_days_95p` | `.png` |
+| `a_Total_rainfall.ipynb` | `F5_Rain_daily` | `.html` (plotly) |
+| `a_Total_rainfall.ipynb` | `F5_Rain_annual_max` | `.html` (plotly) |
+| `a_Total_rainfall.ipynb` | `F5_Rain_accum` | `.png` (via `plot_bar_probs`) |
+| `a_Total_rainfall.ipynb` | `F5_Rain_anom_top10` | `.png` |
+| `a_Total_rainfall.ipynb` | `F6a_Rain_dry_season` | `.png` |
+| `a_Total_rainfall.ipynb` | `F6a_Rain_wet_season` | `.png` |
+| `a_Total_rainfall.ipynb` | `F5_Rain_mean_ONI_daily` | `.png` |
+| `a_Total_rainfall.ipynb` | `F5_Rain_mean_ONI_accum` | `.png` |
+| `b_Consecutive_dry_days.ipynb` | `F6a_Wet_dry_distribution` | `.png` |
+| `b_Consecutive_dry_days.ipynb` | `F6a_Number_dry` | `.png` |
+| `b_Consecutive_dry_days.ipynb` | `F6b_Mean_consecutive_dry` | `.png` |
+| `b_Consecutive_dry_days.ipynb` | `F6b_Consecutive_dry` | `.png` |
+| `c_Heavy_rainfall.ipynb` | `F7a_Wet_dry_distribution` | `.png` |
+| `c_Heavy_rainfall.ipynb` | `F7a_Wet_days_1mm` | `.png` |
+| `c_Heavy_rainfall.ipynb` | `F7b_Wet_days_95p` | `.png` |
 
 Optional diagnostic filename for accumulated rainfall: `F5_Rain_accum_plot_bar_probs_<station_id>_<station_name>.png`.
 
@@ -52,20 +52,20 @@ Optional diagnostic filename for accumulated rainfall: `F5_Rain_accum_plot_bar_p
 
 | Notebook | Base name | Format |
 |---|---|---|
-| `a` | `F2_ST_Mean` | `.png` (via `plot_bar_probs`) |
-| `a` | `F2_ST_Annomalies_top10` | `.png` |
-| `b` | `F3_ST_min` | `.html` + `.png` (via `plot_timeseries_interactive`) |
-| `b` | `F3_ST_max` | `.html` + `.png` |
-| `b` | `F3_ST_min_max` | `.html` + `.png` |
-| `c` | `F4_ST_hot_cold` | `.html` + `.png` |
-| `c` | `F4_ST_hot_cold_percentiles` | `.html` + `.png` |
+| `a_mean_temperature.ipynb` | `F2_ST_Mean` | `.png` (via `plot_bar_probs`) |
+| `a_mean_temperature.ipynb` | `F2_ST_Annomalies_top10` | `.png` |
+| `b_min_max_temperature.ipynb` | `F3_ST_min` | `.html` + `.png` (via `plot_timeseries_interactive`) |
+| `b_min_max_temperature.ipynb` | `F3_ST_max` | `.html` + `.png` |
+| `b_min_max_temperature.ipynb` | `F3_ST_min_max` | `.html` + `.png` |
+| `c_hot_cold_days.ipynb` | `F4_ST_hot_cold` | `.html` + `.png` |
+| `c_hot_cold_days.ipynb` | `F4_ST_hot_cold_percentiles` | `.html` + `.png` |
 
 Save matplotlib: `plt.savefig(site_figures_dir / build_output_filename(...), dpi=300, bbox_inches='tight')`.
 Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='html'))` and, where applicable, `fig.write_image(site_figures_dir / build_output_filename(...))`.
 
 ### Canonical table / JSON filenames — rainfall (`R_*` prefix)
 
-**Notebook `00a`** (`persist_total_rainfall_outputs`):
+**Notebook `a_Total_rainfall.ipynb`** (`persist_total_rainfall_outputs`):
 - `R_mean_annual_<site_tag>.csv`
 - `R_mean_summary_table_<site_tag>.csv`
 - `R_top10_wettest_years_<site_tag>.csv`
@@ -74,14 +74,14 @@ Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='
 - `R_ONI_annual_<site_tag>.csv`
 - `R_mean_summary_metrics_<site_tag>.json`
 
-**Notebook `00b`** (`persist_dry_days_outputs`):
+**Notebook `b_Consecutive_dry_days.ipynb`** (`persist_dry_days_outputs`):
 - `R_dry_days_per_year_<site_tag>.csv`
 - `R_consecutive_dry_max_per_year_<site_tag>.csv`
 - `R_consecutive_dry_mean_per_year_<site_tag>.csv`
 - `R_dry_summary_table_<site_tag>.csv`
 - `R_dry_summary_metrics_<site_tag>.json`
 
-**Notebook `00c`** (`persist_heavy_rainfall_outputs`):
+**Notebook `c_Heavy_rainfall.ipynb`** (`persist_heavy_rainfall_outputs`):
 - `R_wet_days_per_year_<site_tag>.csv`
 - `R_heavy_days_per_year_<site_tag>.csv`
 - `R_heavy_summary_table_<site_tag>.csv`
@@ -89,7 +89,7 @@ Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='
 
 ### Canonical table / JSON filenames — air temperature (`T_*` prefix)
 
-**Notebook `a`** (`persist_mean_temperature_outputs`):
+**Notebook `a_mean_temperature.ipynb`** (`persist_mean_temperature_outputs`):
 - `T_mean_annual_<site_tag>.csv`
 - `T_mean_summary_table_<site_tag>.csv`
 - `T_mean_top10_warmest_years_<site_tag>.csv`
@@ -97,12 +97,12 @@ Save plotly: `fig.write_html(site_figures_dir / build_output_filename(..., ext='
 - `ENSO_temperature_summary_<site_tag>.csv`
 - `T_mean_summary_metrics_<site_tag>.json`
 
-**Notebook `b`** (`persist_minmax_temperature_outputs`):
+**Notebook `b_min_max_temperature.ipynb`** (`persist_minmax_temperature_outputs`):
 - `T_minmax_annual_<site_tag>.csv`
 - `T_minmax_summary_table_<site_tag>.csv`
 - `T_minmax_summary_metrics_<site_tag>.json`
 
-**Notebook `c`** (`persist_hot_cold_outputs`):
+**Notebook `c_hot_cold_days.ipynb`** (`persist_hot_cold_outputs`):
 - `T_hot_days_per_year_<site_tag>.csv`
 - `T_cold_nights_per_year_<site_tag>.csv`
 - `T_hot_cold_summary_table_etccdi_<site_tag>.csv`

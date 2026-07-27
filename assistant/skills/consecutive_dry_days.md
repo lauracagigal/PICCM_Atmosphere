@@ -1,4 +1,4 @@
-## Skill: Consecutive Dry Days (notebook `00b_Consecutive_dry_days.ipynb`)
+## Skill: Consecutive Dry Days (notebook `rainfall/b_Consecutive_dry_days.ipynb`)
 
 ### Purpose
 Quantify dry-day frequency and consecutive dry spells at the site's GHCN station. Dry conditions are a key drought / water-stress indicator for Pacific Island sites.
@@ -12,7 +12,8 @@ Quantify dry-day frequency and consecutive dry spells at the site's GHCN station
 - **Wet day**: `PRCP > 1 mm`.
 - **Consecutive dry days (annual max)**: longest run of dry days within each year, via `consecutive_dry_days` applied per year.
 - **Running consecutive dry days**: per-day count of the current dry spell via `count_consecutive_days` on `PRCP < threshold`.
-- **Year filter**: keep years with ≥ 300 daily observations (`groupby(year).filter(lambda x: len(x) >= 300)`).
+
+Month/year completeness filtering is applied **once**, in the shared `00_site_setup.ipynb`, before the pickle is cached — do not re-filter years by observation count in this notebook.
 
 ### Workflow
 1. Load config and cached `PRCP` data. Build `site_figures_dir`.
@@ -23,7 +24,6 @@ Quantify dry-day frequency and consecutive dry spells at the site's GHCN station
    - Annual count of dry days (`wet_day_t == 0`) → `plot_bar_probs(..., trendline=True, return_trend=True)` → glue `number_dry_days`, save `F6a_Number_dry.png`.
    - Multiply returned trend by 10 to report **days/decade**.
 5. **Consecutive dry days**:
-   - Filter to years with ≥ 300 days.
    - `data['dry_day'] = np.where(PRCP < threshold, 1, 0)`.
    - `consecutive_dry_days` per year (annual maximum spell).
    - `count_consecutive_days` on `PRCP < threshold` for per-day running counts.

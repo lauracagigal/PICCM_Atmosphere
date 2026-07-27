@@ -108,12 +108,12 @@ Both modules implement the **same** site-config API (identical code); either one
 **`air_temp.py`-only**
 - `haversine_km(lon1, lat1, lon2, lat2)` → great-circle distance, used in `00_site_setup.ipynb` to rank nearby GHCN stations.
 
-**Rainfall-specific (`rainfall.py`), dry-spell metrics** (notebook `00b`)
+**Rainfall-specific (`rainfall.py`), dry-spell metrics** (notebook `b_Consecutive_dry_days.ipynb`)
 - `consecutive_dry_days(series)` → maximum consecutive dry days in a boolean series.
 - `count_consecutive_days(series)` → running count of consecutive dry days.
 
 **Persist helpers**
-- `rainfall.py`: `persist_total_rainfall_outputs(...)` (`00a`: CSVs + `R_mean_summary_metrics_*.json`), `persist_dry_days_outputs(...)` (`00b`: CSVs + `R_dry_summary_metrics_*.json`), `persist_heavy_rainfall_outputs(...)` (`00c`: CSVs + `R_heavy_summary_metrics_*.json`).
+- `rainfall.py`: `persist_total_rainfall_outputs(...)` (`a_Total_rainfall.ipynb`: CSVs + `R_mean_summary_metrics_*.json`), `persist_dry_days_outputs(...)` (`b_Consecutive_dry_days.ipynb`: CSVs + `R_dry_summary_metrics_*.json`), `persist_heavy_rainfall_outputs(...)` (`c_Heavy_rainfall.ipynb`: CSVs + `R_heavy_summary_metrics_*.json`).
 - `air_temp.py`: `persist_mean_temperature_outputs(...)` (`a`: CSVs + `T_mean_summary_metrics_*.json`), `persist_minmax_temperature_outputs(...)` (`b`: CSVs + `T_minmax_summary_metrics_*.json`), `persist_hot_cold_outputs(...)` (`c`: CSVs + `T_hot_cold_summary_metrics_*.json`).
 
 ---

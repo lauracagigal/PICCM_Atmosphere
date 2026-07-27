@@ -1,4 +1,4 @@
-## Skill: Total Rainfall (notebook `notebooks/historical/rainfall/00a_Total_rainfall.ipynb`)
+## Skill: Total Rainfall (notebook `notebooks/historical/rainfall/a_Total_rainfall.ipynb`)
 
 ### Purpose
 Quantify annual accumulated precipitation, daily extremes, seasonal totals, and ENSO modulation at the site's GHCN station. Report anomalies relative to the reference period from the site config.

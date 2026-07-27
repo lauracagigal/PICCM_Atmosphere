@@ -12,7 +12,7 @@
 - **Documentation**: `https://www.ncei.noaa.gov/data/global-historical-climatology-network-daily/doc/GHCND_documentation.pdf`.
 - **Citation**: Menne, M.J., I. Durre, R.S. Vose, B.E. Gleason, and T.G. Houston, 2012. *An overview of the Global Historical Climatology Network-Daily Database.* J. Atmos. Oceanic Technol., 29, 897-910.
 
-### ENSO — NOAA ONI (rainfall notebook `00a` and temperature notebook `a`)
+### ENSO — NOAA ONI (rainfall `a_Total_rainfall.ipynb` and temperature `a_mean_temperature.ipynb`)
 
 - **URL**: `https://psl.noaa.gov/data/correlation/oni.data`.
 - **Format**: monthly Niño 3.4 anomalies. `-99.9` → NaN (`download_oni_index`).
@@ -34,7 +34,7 @@
 1. **Download** — concat requested variables, `dropna()`. Temperature additionally derives `TMEAN`/`diff` when both `TMIN` and `TMAX` are present.
 2. **Completeness filter** — `filter_by_time_completeness` with `month_threshold = year_threshold = completeness_threshold` (default 0.75), applied independently to the temperature pickle and the rainfall pickle. Months with < 75% of calendar days observed are dropped; years with < 75% of valid months are dropped.
 
-Rainfall notebooks `00b` and `00c` additionally filter to years with ≥ 300 daily observations before consecutive-dry and heavy-rainfall metrics.
+Rainfall notebooks `b_Consecutive_dry_days.ipynb` and `c_Heavy_rainfall.ipynb` do not apply any additional per-notebook completeness filter — the shared `00_site_setup.ipynb` filter is the only one.
 
 ### Hard rules
 

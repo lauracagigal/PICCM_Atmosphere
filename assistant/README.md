@@ -11,9 +11,9 @@ This folder holds the instructions used to train an external assistant — **CIn
 | File | Notebook / scope |
 |---|---|
 | `site_setup.md` | `notebooks/historical/00_site_setup.ipynb` — shared entry point for both domains; not under `rainfall/` or `air_temperature/` |
-| `total_rainfall.md` | `rainfall/00a_Total_rainfall.ipynb` |
-| `consecutive_dry_days.md` | `rainfall/00b_Consecutive_dry_days.ipynb` |
-| `heavy_rainfall.md` | `rainfall/00c_Heavy_rainfall.ipynb` |
+| `total_rainfall.md` | `rainfall/a_Total_rainfall.ipynb` |
+| `consecutive_dry_days.md` | `rainfall/b_Consecutive_dry_days.ipynb` |
+| `heavy_rainfall.md` | `rainfall/c_Heavy_rainfall.ipynb` |
 | `mean_temperature.md` | `air_temperature/a_mean_temperature.ipynb` |
 | `min_max_temperature.md` | `air_temperature/b_min_max_temperature.ipynb` |
 | `hot_cold_days.md` | `air_temperature/c_hot_cold_days.ipynb` |
@@ -24,7 +24,7 @@ This folder holds the instructions used to train an external assistant — **CIn
 ## Repository quick map
 
 - `notebooks/historical/00_site_setup.ipynb` — single shared entry point; run before anything under `rainfall/` or `air_temperature/`.
-- `notebooks/historical/rainfall/` (`00a`, `00b`, `00c`) and `notebooks/historical/air_temperature/` (`a`, `b`, `c`) — the two indicator-specific analysis folders, both in CIndRA's scope.
+- `notebooks/historical/rainfall/` (`a_Total_rainfall.ipynb`, `b_Consecutive_dry_days.ipynb`, `c_Heavy_rainfall.ipynb`) and `notebooks/historical/air_temperature/` (`a_mean_temperature.ipynb`, `b_min_max_temperature.ipynb`, `c_hot_cold_days.ipynb`) — the two indicator-specific analysis folders, both in CIndRA's scope. Both use bare `a_`/`b_`/`c_` filename prefixes but live in different folders — disambiguate by folder or full filename, not by the bare letter.
 - `functions/` — `rainfall.py` and `air_temp.py` (near-identical site-config API: `save_site_config`, `load_site_config`, `site_config_filename`, `list_available_sites`, `build_site_tag`, ...) plus `temp_func.py` (ETCCDI percentile helpers) and `data_downloaders.py` (GHCN, ONI, completeness filter).
 - `data/rainfall/` — cached per-station GHCN pickles for `PRCP` (`GHCN_<station_id>.pkl`) and optional ONI cache.
 - `data/air_temp/` — cached per-station GHCN pickles for `TMIN`/`TMAX`.

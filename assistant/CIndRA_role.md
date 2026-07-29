@@ -80,8 +80,9 @@ If a p-value or additional regression statistics are needed and not returned by 
 - `notebooks/historical/air_temperature/a_mean_temperature.ipynb` — annual mean temperature, trend, anomaly vs reference period, ENSO modulation (ONI).
 - `notebooks/historical/air_temperature/b_min_max_temperature.ipynb` — annual minimum/maximum temperature and diurnal range (`diff = TMAX − TMIN`).
 - `notebooks/historical/air_temperature/c_hot_cold_days.ipynb` — hot days (TX90p) and cold nights (TN10p) using 1961–1990 percentile thresholds, plus simple percentile counts.
-- `functions/rainfall.py` — rainfall site config I/O, site tag/output helpers, dry-spell metrics, persist helpers.
-- `functions/air_temp.py` — air-temperature site config I/O (same API as `rainfall.py`), site tag/output helpers, `haversine_km` for station ranking, persist helpers.
+- `functions/site_common.py` — shared site config I/O and output-path helpers, re-exported unchanged by both `rainfall.py` and `air_temp.py`.
+- `functions/rainfall.py` — dry-spell metrics, rainfall persist helpers (re-exports `site_common.py`).
+- `functions/air_temp.py` — air-temperature persist helpers (re-exports `site_common.py`).
 - `functions/temp_func.py` — temperature-extreme calculations (`exceedance_rate_for_base_period`, `exceedance_rate_for_outbase_period`).
 - `functions/data_downloaders.py` — GHCN download utilities, ONI download, completeness filtering.
 - `data/sites/` — site configuration JSON files, shared between both domains.
@@ -105,7 +106,7 @@ If a p-value or additional regression statistics are needed and not returned by 
   - `vars_interest` — the variables requested during setup, default `["TMIN", "TMAX", "PRCP"]`. Only the ones actually available at the station get downloaded — check that the corresponding pickle exists (`data/rainfall/GHCN_<id>.pkl` and/or `data/air_temp/GHCN_<id>.pkl`) rather than assuming from `vars_interest` alone.
   - `reference_period_start` / `reference_period_end` — usually `"1961"` / `"1990"`.
   - `completeness_threshold` — usually `0.75`.
-- The `00_site_setup` notebook interactively ranks nearby GHCN stations using `haversine_km` and `GHCN.download_stations_info`. The user picks one; the assistant must respect that choice.
+- The `00_site_setup` notebook lists GHCN stations for the chosen country alphabetically (`GHCN.download_stations_info`, sorted by name) for the user to choose from. The user picks one; the assistant must respect that choice.
 - Station selection priority: (1) `ghcn_station_id` from the site config; (2) if missing, resolve candidate stations using GHCN metadata and ask the user to choose; (3) do not invent station IDs.
 
 ---
@@ -212,15 +213,16 @@ When plotting: (1) load the cleaned pickle; (2) compute normalised annual accumu
 
 ## CIndRA Functions API (summary)
 
-### `functions/rainfall.py`
+### `functions/site_common.py`
 - `site_config_filename`, `save_site_config`, `load_site_config`, `list_available_sites`
 - `build_site_tag`, `build_output_filename`, `build_site_figures_dir`, `build_site_tables_dir`
+- Re-exported unchanged by both `rainfall.py` and `air_temp.py` — import from whichever domain module matches the notebook.
+
+### `functions/rainfall.py`
 - `consecutive_dry_days`, `count_consecutive_days`
 - `persist_total_rainfall_outputs`, `persist_dry_days_outputs`, `persist_heavy_rainfall_outputs`
 
 ### `functions/air_temp.py`
-- Same site-config API as `rainfall.py`: `site_config_filename`, `save_site_config`, `load_site_config`, `list_available_sites`, `build_site_tag`, `build_output_filename`, `build_site_figures_dir`, `build_site_tables_dir`.
-- `haversine_km` — great-circle distance for ranking nearby GHCN stations.
 - `persist_mean_temperature_outputs`, `persist_minmax_temperature_outputs`, `persist_hot_cold_outputs`.
 
 ### `functions/temp_func.py`

@@ -1,4 +1,39 @@
-"""Regional Pacific map helpers for CIPSAP station analysis."""
+"""Regional (multi-station) Pacific map helpers.
+
+Everything needed to go from the GHCN station dictionary built by
+``01_regional_setup.ipynb`` to a Pacific EEZ map: per-station rainfall/
+temperature indicators, the shared ``RegionalMapConfig``-driven trend/mean
+map machinery, and ERA5 background fields (with NetCDF caching, since
+pulling+aggregating a global monthly ERA5 field over the network is slow).
+
+Despite the filename, this module is used by both
+``Regional/rainfall/compute_regional_indicators.ipynb`` and
+``Regional/air_temperature/compute_regional_indicators.ipynb`` -- it grew out
+of an EEZ-mapping module originally written for CIPSAP station CSVs (hence
+``EEZ_LABEL_MAP``, ``create_pacific_base_map``, the ERA5 helpers), then picked
+up the GHCN-specific indicator functions on top. The CIPSAP CSV loaders this
+repo never used (``data/cipsap/`` doesn't exist here) have been removed --
+see git history if a CIPSAP monthly/annual CSV loader is needed again.
+
+Three parallel families of functions:
+
+- **Indicators**: ``compute_regional_rainfall_indicators`` /
+  ``compute_regional_temperature_indicators`` (station dict -> per-station
+  annual DataFrames), mirroring the National single-site notebooks'
+  per-year formulas.
+- **Station-only maps**: ``RegionalMapConfig`` + ``build_sites_map_dataframe``
+  + ``plot_annual_regional_map`` (generic: pass any annual-indicator column
+  as ``variable``).
+- **ERA5-background maps**: ``plot_monthly_rainfall_with_era5_background`` /
+  ``plot_monthly_temperature_with_era5_background`` (grid field masked to the
+  EEZs, station points overlaid), plus ``load_or_compute_era5_annual_rainfall``
+  / ``load_or_compute_era5_annual_temperature`` for NetCDF caching and
+  ``plot_era5_eez_temperature_anomaly`` for an EEZ area-weighted anomaly time
+  series. Only indicators reconstructable from *monthly* ERA5 fields have an
+  ERA5 counterpart (annual accumulated rainfall, annual mean temperature) --
+  anything needing daily data (dry-day counts, hot/cold days, diurnal range)
+  is GHCN-station-only.
+"""
 
 from __future__ import annotations
 
@@ -48,14 +83,11 @@ class RegionalMapConfig:
     missing_value: float = -99.9
     trend_as_percent: bool = False
     min_months_per_year: int = 10
+    min_years: int = 2  # a "trend" fit through fewer years than this is reported as NaN
     cmap: str | None = None
     vmin: float | None = None
     vmax: float | None = None
     color_label: str | None = None
-
-
-# Backwards-compatible alias
-RegionalMapSettings = RegionalMapConfig
 
 
 def load_pacific_eez(data_dir: str | Path) -> gpd.GeoDataFrame:
@@ -64,56 +96,406 @@ def load_pacific_eez(data_dir: str | Path) -> gpd.GeoDataFrame:
     return gpd.read_file(shp)
 
 
-def load_station_annual(data_dir: str | Path, location: str) -> pd.DataFrame | None:
-    data_dir = Path(data_dir)
-    files = sorted(glob.glob(str(data_dir / "cipsap" / f"{location}*indices_annual*.csv")))
-    files = [f for f in files if not f.endswith(" 2.csv")] or files
-    return pd.read_csv(files[0]) if files else None
+RAINFALL_INDICATOR_LABELS = {
+    "total_annual_mm": "total annual rainfall",
+    "dry_days": "number of dry days (<1 mm)",
+    "wet_days": "number of wet days (>1 mm)",
+    "max_consecutive_dry_days": "maximum consecutive dry days",
+    "mean_consecutive_dry_days": "mean consecutive dry days",
+    "heavy_days": "days above the station's 95th percentile",
+}
+
+RAINFALL_INDICATOR_UNITS = {
+    "total_annual_mm": "mm / decade",
+    "dry_days": "days / decade",
+    "wet_days": "days / decade",
+    "max_consecutive_dry_days": "days / decade",
+    "mean_consecutive_dry_days": "days / decade",
+    "heavy_days": "days / decade",
+}
 
 
-def load_station_monthly(data_dir: str | Path, location: str) -> pd.DataFrame | None:
-    data_dir = Path(data_dir)
-    files = sorted(glob.glob(str(data_dir / "cipsap" / f"{location}*variables_monthly*.csv")))
-    files = [f for f in files if not f.endswith(" 2.csv")] or files
-    return pd.read_csv(files[0]) if files else None
+def _station_rainfall_indicators(
+    daily_df: pd.DataFrame,
+    dry_wet_threshold_mm: float = 1.0,
+    heavy_percentile: float = 95,
+    min_year_completeness: float = 0.75,
+) -> tuple[pd.DataFrame, float]:
+    """Per-station annual rainfall indicators, mirroring the National rainfall notebooks.
+
+    Reproduces, column for column, what ``a_Total_rainfall.ipynb``,
+    ``b_Consecutive_dry_days.ipynb`` and ``c_Heavy_rainfall.ipynb`` compute for a
+    single site, so the same numbers underlie both the per-site notebooks and the
+    regional maps built from ``compute_regional_rainfall_indicators``.
+
+    ``min_year_completeness`` guards ``total_annual_mm`` in particular:
+    ``01_regional_setup.ipynb`` applies its completeness filter to the merged
+    TMIN/TMAX/PRCP frame, so a year can pass on temperature coverage alone
+    while PRCP itself has only a handful of real observations that year. Since
+    ``total_annual_mm`` extrapolates via ``sum / count * 365``, a year with
+    e.g. 5 real PRCP days would inflate to an absurd annual total. Years where
+    fewer than ``min_year_completeness`` of calendar days have a non-null
+    PRCP value are dropped from every indicator here, independent of whatever
+    the upstream (multi-variable) completeness filter already did.
+
+    Returns ``(annual_df, heavy_threshold_mm)``: ``annual_df`` has a ``Year``
+    column plus ``total_annual_mm``, ``dry_days``, ``wet_days``,
+    ``max_consecutive_dry_days``, ``mean_consecutive_dry_days``, ``heavy_days``
+    (one row per calendar year with sufficient PRCP coverage); ``heavy_threshold_mm``
+    is the station's own 95th-percentile daily rainfall, computed once over its
+    full record (matching ``c_Heavy_rainfall.ipynb``).
+    """
+    from rainfall import count_consecutive_days
+
+    prcp = daily_df[["PRCP"]].copy()
+
+    prcp_days_present = prcp["PRCP"].notna().groupby(prcp.index.year).sum()
+    days_in_year = pd.Series(
+        {year: pd.Timestamp(year=int(year), month=12, day=31).dayofyear for year in prcp_days_present.index}
+    )
+    complete_years = prcp_days_present.index[
+        (prcp_days_present / days_in_year) >= min_year_completeness
+    ]
+
+    # a_Total_rainfall.ipynb: count-normalised annual accumulation.
+    total_annual_mm = (
+        prcp.groupby(prcp.index.year).sum()["PRCP"]
+        / prcp.groupby(prcp.index.year).count()["PRCP"]
+    ) * 365
+
+    # b_Consecutive_dry_days.ipynb: dry-day count, computed before dropna (as in the notebook).
+    wet_day_t = np.where(prcp["PRCP"] > dry_wet_threshold_mm, 1, np.where(prcp["PRCP"].isna(), np.nan, 0))
+    dry_rows = prcp.loc[wet_day_t == 0]
+    dry_days = dry_rows.groupby(dry_rows.index.year).count()["PRCP"]
+
+    # b_Consecutive_dry_days.ipynb: consecutive dry-day runs, computed after dropna (as in the notebook).
+    prcp_valid = prcp.dropna()
+
+    # Unlike the single-site notebook, a regional station can have multi-year
+    # reporting gaps (e.g. a decades-old paper record digitized in separate
+    # batches). Running count_consecutive_days directly on prcp_valid.dropna()
+    # would silently treat the last dry day before a gap and the first dry day
+    # after it as adjacent, "stitching" unrelated dry spells into one absurd
+    # run (observed: a single-year value of 2637 consecutive dry days). Reindex
+    # to the full daily calendar range first so a missing day breaks the run
+    # (NaN -> not-dry), then only average over actually-observed days so the
+    # mean keeps its original meaning.
+    full_range = pd.date_range(prcp.index.min(), prcp.index.max(), freq="D")
+    prcp_daily = prcp.reindex(full_range)
+    below_threshold_daily = prcp_daily["PRCP"] < dry_wet_threshold_mm
+    consecutive_days_daily = pd.Series(count_consecutive_days(below_threshold_daily), index=full_range)
+
+    observed_mask = prcp_daily["PRCP"].notna()
+    consecutive_days_observed = consecutive_days_daily[observed_mask]
+
+    max_consecutive_dry_days = consecutive_days_daily.groupby(full_range.year).max()
+    mean_consecutive_dry_days = consecutive_days_observed.groupby(consecutive_days_observed.index.year).mean()
+
+    # c_Heavy_rainfall.ipynb: wet-day count and heavy-rainfall day count (post-dropna).
+    wet_rows = prcp_valid.loc[prcp_valid["PRCP"] > dry_wet_threshold_mm]
+    wet_days = wet_rows.groupby(wet_rows.index.year).count()["PRCP"]
+
+    heavy_threshold_mm = float(np.round(np.percentile(prcp_valid["PRCP"], heavy_percentile), 2))
+    heavy_rows = prcp_valid.loc[prcp_valid["PRCP"] > heavy_threshold_mm]
+    heavy_days = heavy_rows.groupby(heavy_rows.index.year).count()["PRCP"]
+
+    annual_df = pd.DataFrame({
+        "total_annual_mm": total_annual_mm,
+        "dry_days": dry_days,
+        "wet_days": wet_days,
+        "max_consecutive_dry_days": max_consecutive_dry_days,
+        "mean_consecutive_dry_days": mean_consecutive_dry_days,
+        "heavy_days": heavy_days,
+    })
+    annual_df = annual_df.loc[annual_df.index.isin(complete_years)]
+    annual_df.index.name = "Year"
+    return annual_df.reset_index(), heavy_threshold_mm
 
 
-def load_cipsap_annual_data(dict_lon_lat: dict, data_dir: str | Path) -> dict[str, pd.DataFrame]:
+def compute_regional_rainfall_indicators(
+    stations_data: dict,
+    dry_wet_threshold_mm: float = 1.0,
+    heavy_percentile: float = 95,
+    min_year_completeness: float = 0.75,
+) -> tuple[dict, dict, dict]:
+    """Compute the National rainfall indicators for every station in a regional dict.
+
+    ``stations_data`` is the dictionary produced by ``01_regional_setup.ipynb``
+    (``{station_id: {..., "lat", "lon", "data": daily DataFrame with a PRCP column}}``,
+    typically loaded back from ``data/regional/<region_key>_stations.pkl``).
+    Stations without a usable ``PRCP`` column are skipped.
+
+    ``min_year_completeness`` (see :func:`_station_rainfall_indicators`) drops
+    any year where fewer than this fraction of calendar days have a real PRCP
+    observation, independent of ``01_regional_setup.ipynb``'s own (TMIN/TMAX/PRCP
+    merged) completeness filter -- this prevents ``total_annual_mm`` from
+    extrapolating a handful of PRCP days up to an absurd annual figure.
+
+    Returns ``(dict_lon_lat, annual_data, heavy_thresholds)``:
+
+    - ``dict_lon_lat`` / ``annual_data`` plug directly into
+      ``build_sites_map_dataframe`` / ``plot_annual_regional_map`` — pass
+      ``variable`` as one of the keys in :data:`RAINFALL_INDICATOR_LABELS`.
+    - ``heavy_thresholds`` maps ``station_id`` to its 95th-percentile daily
+      rainfall threshold (mm).
+    """
+    dict_lon_lat = {}
     annual_data = {}
-    for location in dict_lon_lat:
-        df = load_station_annual(data_dir, location)
-        if df is not None:
-            annual_data[location] = df.copy()
-    return annual_data
+    heavy_thresholds = {}
+
+    for station_id, station in stations_data.items():
+        daily_df = station.get("data")
+        if daily_df is None or "PRCP" not in daily_df.columns or daily_df["PRCP"].dropna().empty:
+            continue
+
+        annual_df, heavy_threshold_mm = _station_rainfall_indicators(
+            daily_df, dry_wet_threshold_mm=dry_wet_threshold_mm, heavy_percentile=heavy_percentile,
+            min_year_completeness=min_year_completeness,
+        )
+        annual_data[station_id] = annual_df
+        heavy_thresholds[station_id] = heavy_threshold_mm
+        dict_lon_lat[station_id] = {"lat": station["lat"], "lon": station["lon"]}
+
+    return dict_lon_lat, annual_data, heavy_thresholds
 
 
-def load_cipsap_monthly_data(dict_lon_lat: dict, data_dir: str | Path) -> dict[str, pd.DataFrame]:
-    monthly_data = {}
-    for location in dict_lon_lat:
-        df = load_station_monthly(data_dir, location)
-        if df is not None:
-            monthly_data[location] = df.copy()
-    return monthly_data
+TEMPERATURE_INDICATOR_LABELS = {
+    "tmean_annual": "mean annual temperature",
+    "tmin_annual": "mean annual minimum temperature",
+    "tmax_annual": "mean annual maximum temperature",
+    "diff_annual": "mean annual diurnal temperature range",
+    "hot_days_pct": "hot days (> station's 90th percentile)",
+    "cold_nights_pct": "cold nights (< station's 10th percentile)",
+}
+
+TEMPERATURE_INDICATOR_UNITS = {
+    "tmean_annual": "°C / decade",
+    "tmin_annual": "°C / decade",
+    "tmax_annual": "°C / decade",
+    "diff_annual": "°C / decade",
+    "hot_days_pct": "% / decade",
+    "cold_nights_pct": "% / decade",
+}
 
 
-def build_annual_panel(annual_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Stack annual indices into one dataframe with a site column."""
-    frames = []
-    for site, df in annual_data.items():
-        part = _prepare_year_df(df).copy()
-        part.insert(0, "site", site)
-        frames.append(part)
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+def _year_completeness_mask(daily_series: pd.Series, min_year_completeness: float) -> pd.Index:
+    """Years where ``daily_series`` has at least ``min_year_completeness`` of calendar days present."""
+    days_present = daily_series.notna().groupby(daily_series.index.year).sum()
+    days_in_year = pd.Series(
+        {year: pd.Timestamp(year=int(year), month=12, day=31).dayofyear for year in days_present.index}
+    )
+    return days_present.index[(days_present / days_in_year) >= min_year_completeness]
 
 
-def build_monthly_panel(monthly_data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Stack monthly variables into one dataframe with a site column."""
-    frames = []
-    for site, df in monthly_data.items():
-        part = _prepare_year_df(df).copy()
-        part.insert(0, "site", site)
-        frames.append(part)
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+def _station_temperature_indicators(
+    daily_df: pd.DataFrame,
+    reference_period_start: int = 1961,
+    reference_period_end: int = 1990,
+    min_year_completeness: float = 0.75,
+) -> tuple[pd.DataFrame, dict]:
+    """Per-station annual temperature indicators, mirroring the National air-temperature notebooks.
+
+    Reproduces ``a_mean_temperature.ipynb`` (``tmean_annual``),
+    ``b_min_max_temperature.ipynb`` (``tmin_annual``, ``tmax_annual``,
+    ``diff_annual``) and the **fixed-percentile companion metric** from
+    ``c_hot_cold_days.ipynb`` (``hot_days_pct``, ``cold_nights_pct``): a single
+    station-wide 90th/10th percentile threshold of ``TMAX``/``TMIN`` over the
+    reference period, not the full calendar-day ETCCDI TX90p/TN10p climatology.
+    The ETCCDI method (``functions/temp_func.py``) estimates a percentile per
+    calendar day from a centred 5-day window scanned with nested Python loops
+    over the whole base period -- fine for one station, far too slow to run
+    for a few hundred. The fixed-percentile variant is the same simplification
+    ``c_hot_cold_days.ipynb`` itself offers as "a simpler companion metric".
+
+    ``min_year_completeness`` mirrors ``_station_rainfall_indicators``: each
+    indicator's source column (``TMEAN``/``TMIN``/``TMAX``) is masked to NaN
+    for any year where fewer than this fraction of calendar days have a real
+    observation for *that* column -- a station can report TMAX far more
+    consistently than TMIN (or vice versa), so completeness is evaluated per
+    variable rather than once for the whole station.
+
+    Returns ``(annual_df, thresholds)``: ``annual_df`` has a ``Year`` column
+    plus ``tmean_annual``, ``tmin_annual``, ``tmax_annual``, ``diff_annual``
+    (°C) and ``hot_days_pct``, ``cold_nights_pct`` (percent of days in the
+    year, 0-100); ``thresholds`` is ``{"tmax_q90": ..., "tmin_q10": ...}``,
+    the station's own reference-period thresholds (°C).
+    """
+    cols = [c for c in ("TMIN", "TMAX", "TMEAN", "diff") if c in daily_df.columns]
+    temp = daily_df[cols].copy()
+    if "TMEAN" not in temp.columns and {"TMIN", "TMAX"}.issubset(temp.columns):
+        temp["TMEAN"] = (temp["TMAX"] + temp["TMIN"]) / 2
+    if "diff" not in temp.columns and {"TMIN", "TMAX"}.issubset(temp.columns):
+        temp["diff"] = temp["TMAX"] - temp["TMIN"]
+
+    annuals = {}
+
+    if "TMEAN" in temp.columns:
+        series = temp["TMEAN"].groupby(temp.index.year).mean()
+        annuals["tmean_annual"] = series.loc[series.index.isin(_year_completeness_mask(temp["TMEAN"], min_year_completeness))]
+    if "TMIN" in temp.columns:
+        series = temp["TMIN"].groupby(temp.index.year).mean()
+        annuals["tmin_annual"] = series.loc[series.index.isin(_year_completeness_mask(temp["TMIN"], min_year_completeness))]
+    if "TMAX" in temp.columns:
+        series = temp["TMAX"].groupby(temp.index.year).mean()
+        annuals["tmax_annual"] = series.loc[series.index.isin(_year_completeness_mask(temp["TMAX"], min_year_completeness))]
+    if "diff" in temp.columns:
+        series = temp["diff"].groupby(temp.index.year).mean()
+        complete_diff_years = _year_completeness_mask(temp["TMIN"], min_year_completeness).intersection(
+            _year_completeness_mask(temp["TMAX"], min_year_completeness)
+        )
+        annuals["diff_annual"] = series.loc[series.index.isin(complete_diff_years)]
+
+    thresholds = {"tmax_q90": None, "tmin_q10": None}
+    ref = temp.loc[str(reference_period_start):str(reference_period_end)]
+
+    if "TMAX" in temp.columns and ref["TMAX"].notna().sum() >= 30:
+        tmax_q90 = float(ref["TMAX"].quantile(0.9))
+        thresholds["tmax_q90"] = tmax_q90
+        hot = (temp["TMAX"] > tmax_q90).astype(float)
+        hot[temp["TMAX"].isna()] = np.nan
+        hot_pct = hot.groupby(temp.index.year).mean() * 100
+        annuals["hot_days_pct"] = hot_pct.loc[hot_pct.index.isin(_year_completeness_mask(temp["TMAX"], min_year_completeness))]
+
+    if "TMIN" in temp.columns and ref["TMIN"].notna().sum() >= 30:
+        tmin_q10 = float(ref["TMIN"].quantile(0.1))
+        thresholds["tmin_q10"] = tmin_q10
+        cold = (temp["TMIN"] < tmin_q10).astype(float)
+        cold[temp["TMIN"].isna()] = np.nan
+        cold_pct = cold.groupby(temp.index.year).mean() * 100
+        annuals["cold_nights_pct"] = cold_pct.loc[cold_pct.index.isin(_year_completeness_mask(temp["TMIN"], min_year_completeness))]
+
+    annual_df = pd.DataFrame(annuals)
+    annual_df.index.name = "Year"
+    return annual_df.reset_index(), thresholds
+
+
+def compute_regional_temperature_indicators(
+    stations_data: dict,
+    reference_period_start: int = 1961,
+    reference_period_end: int = 1990,
+    min_year_completeness: float = 0.75,
+) -> tuple[dict, dict, dict]:
+    """Compute the National air-temperature indicators for every station in a regional dict.
+
+    ``stations_data`` is the dictionary produced by ``01_regional_setup.ipynb``
+    (``{station_id: {..., "lat", "lon", "data": daily DataFrame with TMIN/TMAX
+    columns}}``, typically loaded back from ``data/regional/<region_key>_stations.pkl``).
+    Stations without usable TMIN/TMAX data are skipped.
+
+    Returns ``(dict_lon_lat, annual_data, thresholds)``:
+
+    - ``dict_lon_lat`` / ``annual_data`` plug directly into
+      ``build_sites_map_dataframe`` / ``plot_annual_regional_map`` — pass
+      ``variable`` as one of the keys in :data:`TEMPERATURE_INDICATOR_LABELS`.
+    - ``thresholds`` maps ``station_id`` to ``{"tmax_q90", "tmin_q10"}`` (°C).
+    """
+    dict_lon_lat = {}
+    annual_data = {}
+    thresholds = {}
+
+    for station_id, station in stations_data.items():
+        daily_df = station.get("data")
+        has_temp = daily_df is not None and ({"TMIN", "TMAX"} & set(daily_df.columns))
+        if not has_temp:
+            continue
+        if daily_df[[c for c in ("TMIN", "TMAX") if c in daily_df.columns]].dropna(how="all").empty:
+            continue
+
+        annual_df, station_thresholds = _station_temperature_indicators(
+            daily_df,
+            reference_period_start=reference_period_start,
+            reference_period_end=reference_period_end,
+            min_year_completeness=min_year_completeness,
+        )
+        annual_data[station_id] = annual_df
+        thresholds[station_id] = station_thresholds
+        dict_lon_lat[station_id] = {"lat": station["lat"], "lon": station["lon"]}
+
+    return dict_lon_lat, annual_data, thresholds
+
+
+def compute_regional_temperature_anomaly_series(
+    annual_data: dict[str, pd.DataFrame],
+    reference_period_start: int = 1961,
+    reference_period_end: int = 1990,
+    variable: str = "tmean_annual",
+    smooth_years: int = 5,
+) -> tuple[pd.Series, pd.Series]:
+    """Regional-mean annual temperature anomaly across stations (Figure-7 style).
+
+    For each station, subtracts that station's own reference-period mean from
+    its annual series (so stations at very different absolute temperatures
+    contribute comparable anomalies), then takes a simple unweighted average
+    across stations for each year -- not an area-weighted spatial mean like
+    ``plot_era5_eez_temperature_anomaly`` computes for the ERA5 grid, just a
+    station average, since GHCN stations aren't a regular grid.
+
+    Returns ``(annual_anomaly, smoothed)`` -- ``smoothed`` is the centred
+    ``smooth_years`` rolling mean, matching the dashed line in Figure 7.
+    """
+    anomalies = []
+    for df in annual_data.values():
+        if variable not in df.columns:
+            continue
+        series = df.set_index("Year")[variable].dropna()
+        ref_mean = series.loc[
+            (series.index >= reference_period_start) & (series.index <= reference_period_end)
+        ].mean()
+        if pd.isna(ref_mean):
+            continue
+        anomalies.append(series - ref_mean)
+
+    if not anomalies:
+        empty = pd.Series(dtype=float)
+        return empty, empty
+
+    combined = pd.concat(anomalies, axis=1)
+    annual_anomaly = combined.mean(axis=1).sort_index()
+    smoothed = annual_anomaly.rolling(window=smooth_years, center=True, min_periods=1).mean()
+    return annual_anomaly, smoothed
+
+
+def load_or_compute_era5_annual_temperature(
+    era5_ds,
+    cache_path: str | Path,
+    metric: str,
+    period_start: int = 1951,
+    period_end: int = 2020,
+    temp_var: str = "t2m",
+    force_recompute: bool = False,
+):
+    """Compute the ERA5 annual-temperature mean/trend field, cached as NetCDF.
+
+    Same caching pattern as :func:`load_or_compute_era5_annual_rainfall` --
+    see that function's docstring for the rationale and cache-hit behaviour.
+    """
+    import xarray as xr
+
+    try:
+        import h5netcdf  # noqa: F401
+        netcdf_engine = "h5netcdf"
+    except ImportError:
+        netcdf_engine = None
+
+    cache_path = Path(cache_path)
+    if cache_path.exists() and not force_recompute:
+        return xr.open_dataarray(cache_path, engine=netcdf_engine)
+
+    if metric == "trend":
+        field = compute_era5_annual_temperature_trend(
+            era5_ds, period_start=period_start, period_end=period_end, temp_var=temp_var,
+        )
+    elif metric == "mean":
+        field = compute_era5_annual_mean_temperature(
+            era5_ds, period_start=period_start, period_end=period_end, temp_var=temp_var,
+        )
+    else:
+        raise ValueError("metric must be 'mean' or 'trend'")
+
+    field = field.load()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    field.to_netcdf(cache_path, engine=netcdf_engine)
+    return field
 
 
 def _prepare_year_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -146,6 +528,7 @@ def _compute_metric_from_series(
     series: pd.Series,
     metric: str,
     trend_as_percent: bool = False,
+    min_years: int = 2,
 ) -> dict:
     values = series.dropna()
     if metric == "mean":
@@ -154,6 +537,12 @@ def _compute_metric_from_series(
             "p_value": np.nan,
             "n_years": int(len(values)),
         }
+
+    if len(values) < min_years:
+        # A linear fit through very few points is a near-perfect (and
+        # meaningless) line -- e.g. exactly 2 years always gives p=0.0 and can
+        # produce an enormous slope that then dominates a map's colour scale.
+        return {"value": np.nan, "p_value": np.nan, "n_years": int(len(values))}
 
     years = pd.Series(values.index.astype(float).values)
     vals = pd.Series(values.values)
@@ -220,7 +609,7 @@ def build_sites_map_dataframe(
         else:
             series = pd.Series(dtype=float)
 
-        metric = _compute_metric_from_series(series, config.metric, config.trend_as_percent)
+        metric = _compute_metric_from_series(series, config.metric, config.trend_as_percent, min_years=config.min_years)
         records.append({"site": site, "lat": coords["lat"], "lon": coords["lon"], **metric})
 
     sites_df = pd.DataFrame(records)
@@ -413,124 +802,6 @@ def plot_annual_regional_map(
         annual_data=annual_data,
         variable_labels=variable_labels,
         **kwargs,
-    )
-
-
-def plot_monthly_regional_map(
-    dict_lon_lat: dict,
-    monthly_data: dict[str, pd.DataFrame],
-    data_dir: str | Path,
-    config: RegionalMapConfig,
-    variable_labels: dict | None = None,
-    **kwargs,
-):
-    """Plot one monthly variable (RAIN, TMAX, TMIN, TMEAN) on the Pacific base map."""
-    return plot_regional_map(
-        dict_lon_lat,
-        data_dir,
-        config,
-        monthly_data=monthly_data,
-        variable_labels=variable_labels,
-        **kwargs,
-    )
-
-
-def plot_station_locations(
-    dict_lon_lat: dict,
-    data_dir: str | Path,
-    site_name: str | None = None,
-    figsize: tuple[float, float] = (16, 9),
-    show_selected: bool = True,
-):
-    sites_df = pd.DataFrame(
-        [{"site": name, "lat": coords["lat"], "lon": coords["lon"]} for name, coords in dict_lon_lat.items()]
-    )
-    selected = sites_df["site"].eq(site_name) if site_name else pd.Series(False, index=sites_df.index)
-
-    fig, ax, _ = create_pacific_base_map(data_dir, figsize=figsize)
-    ax.scatter(
-        sites_df.loc[~selected, "lon"],
-        sites_df.loc[~selected, "lat"],
-        transform=ccrs.PlateCarree(),
-        s=70,
-        c="#3498db",
-        edgecolors="black",
-        linewidths=0.8,
-        zorder=6,
-        label="CIPSAP stations",
-    )
-    if show_selected and site_name and selected.any():
-        ax.scatter(
-            sites_df.loc[selected, "lon"],
-            sites_df.loc[selected, "lat"],
-            transform=ccrs.PlateCarree(),
-            s=90,
-            c="#e74c3c",
-            edgecolors="black",
-            linewidths=0.8,
-            zorder=7,
-            label=f"Selected: {site_name}",
-        )
-
-    ax.set_title(f"CIPSAP station locations ({len(sites_df)} sites)", fontsize=14, pad=12)
-    ax.legend(loc="lower left", framealpha=0.9, fontsize=9)
-    return fig, ax, sites_df
-
-
-# Backwards-compatible wrappers
-def plot_station_metric_map(dict_lon_lat, data_dir, settings, variable_labels=None, **kwargs):
-    settings = RegionalMapConfig(
-        variable=settings.map_variable,
-        metric=settings.map_metric,
-        period_start=settings.period_start,
-        period_end=settings.period_end,
-        significance_level=settings.significance_level,
-        missing_value=settings.missing_value,
-        trend_as_percent=settings.trend_as_percent,
-    )
-    annual_data = load_cipsap_annual_data(dict_lon_lat, data_dir)
-    return plot_annual_regional_map(dict_lon_lat, annual_data, data_dir, settings, variable_labels, **kwargs)
-
-
-def plot_annual_rainfall_wet_days_trend_map(dict_lon_lat, monthly_data, data_dir, **kwargs):
-    config = RegionalMapConfig(variable="RAIN", metric="trend", vmin=-60, vmax=60, color_label="mm / decade")
-    for key, value in kwargs.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
-    return plot_monthly_regional_map(
-        dict_lon_lat,
-        monthly_data,
-        data_dir,
-        config,
-        variable_labels={"RAIN": "annual total rainfall on wet days"},
-    )
-
-
-def plot_consecutive_dry_days_trend_map(dict_lon_lat, annual_data, data_dir, **kwargs):
-    config = RegionalMapConfig(variable="cdd", metric="trend", vmin=-1, vmax=1, color_label="days / decade")
-    for key, value in kwargs.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
-    return plot_annual_regional_map(
-        dict_lon_lat,
-        annual_data,
-        data_dir,
-        config,
-        variable_labels={"cdd": "annual consecutive dry days"},
-    )
-
-
-def plot_heavy_rainfall_trend_map(dict_lon_lat, annual_data, data_dir, **kwargs):
-    config = RegionalMapConfig(variable="r95p", metric="trend", vmin=-8, vmax=8, color_label="mm / decade")
-    for key, value in kwargs.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
-    return plot_annual_regional_map(
-        dict_lon_lat,
-        annual_data,
-        data_dir,
-        config,
-        variable_labels={"r95p": "annual heavy rainfall"},
     )
 
 
@@ -744,11 +1015,12 @@ def compute_era5_annual_temperature_trend(
 
 def _plot_era5_field_with_cipsap_stations(
     dict_lon_lat: dict,
-    monthly_data: dict[str, pd.DataFrame],
+    monthly_data: dict[str, pd.DataFrame] | None,
     data_dir: str | Path,
     era5_field,
     config: RegionalMapConfig,
     *,
+    annual_data: dict[str, pd.DataFrame] | None = None,
     variable_labels: dict | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
@@ -759,10 +1031,20 @@ def _plot_era5_field_with_cipsap_stations(
     figsize: tuple[float, float] = (14, 9),
     label_fontsize: int = 9,
 ):
-    """Shared Pacific map: ERA5 field masked to EEZs + coloured CIPSAP station points."""
+    """Shared Pacific map: ERA5 field masked to EEZs + coloured station points.
+
+    Station data is either CIPSAP-style ``monthly_data`` (aggregated to annual
+    internally, e.g. summing monthly ``RAIN``) or already-annual ``annual_data``
+    (e.g. the GHCN-derived indicators from ``compute_regional_rainfall_indicators``)
+    -- provide exactly one.
+    """
+    if (annual_data is None) == (monthly_data is None):
+        raise ValueError("Provide exactly one of annual_data or monthly_data.")
+
     variable_labels = variable_labels or {}
-    sites_df = build_sites_map_dataframe(dict_lon_lat, config, monthly_data=monthly_data)
-    style = _map_style(sites_df, config, variable_labels, source="monthly")
+    source = "annual" if annual_data is not None else "monthly"
+    sites_df = build_sites_map_dataframe(dict_lon_lat, config, annual_data=annual_data, monthly_data=monthly_data)
+    style = _map_style(sites_df, config, variable_labels, source=source)
 
     _, lons_plot, lons_180, lats, values = _prepare_era5_field_for_pacific_map(era5_field)
 
@@ -843,10 +1125,11 @@ def _plot_era5_field_with_cipsap_stations(
         if plot_df["significant"].any():
             ax.legend(loc="lower left", framealpha=0.9, fontsize=9)
 
+    station_source = "CIPSAP stations" if monthly_data is not None else "GHCN stations"
     cbar = fig.colorbar(mesh, ax=ax, orientation="horizontal", pad=0.08, shrink=0.7, aspect=35)
     cbar.set_label(color_label)
     ax.set_title(
-        title or style["title"] + "\n(ERA5 background within EEZs, CIPSAP stations)",
+        title or style["title"] + f"\n(ERA5 background within EEZs, {station_source})",
         fontsize=14,
         pad=12,
     )
@@ -1070,9 +1353,74 @@ def plot_era5_eez_temperature_anomaly(
     return fig, ax, anomaly_df, smooth
 
 
+def load_or_compute_era5_annual_rainfall(
+    era5_ds,
+    cache_path: str | Path,
+    metric: str,
+    period_start: int = 1951,
+    period_end: int = 2020,
+    precip_var: str = "tp",
+    force_recompute: bool = False,
+):
+    """Compute the ERA5 annual-rainfall mean/trend field, cached as NetCDF.
+
+    Pulling and aggregating a global monthly ERA5 field over the network is
+    slow; once computed for a given ``metric``/period it is saved at
+    ``cache_path`` so later notebook runs load it straight from disk instead
+    of recomputing. Pass ``era5_ds=None`` when reusing a cache you know
+    exists -- it is only touched on a cache miss.
+
+    Parameters
+    ----------
+    era5_ds : xarray.Dataset or None
+        Opened ERA5 dataset (e.g. from ``xr.open_dataset(..., engine="zarr")``).
+        Only read if ``cache_path`` doesn't exist yet or ``force_recompute``.
+    cache_path : str or pathlib.Path
+        NetCDF file to read from / write to.
+    metric : str
+        ``"trend"`` (mm/decade) or ``"mean"`` (mm).
+    force_recompute : bool, optional
+        Recompute and overwrite the cache even if it already exists.
+
+    Returns
+    -------
+    xarray.DataArray
+    """
+    import xarray as xr
+
+    # h5netcdf avoids depending on the system netCDF4 install (which can be
+    # broken/architecture-mismatched in some conda setups); fall back to
+    # xarray's default engine detection if h5netcdf isn't available either.
+    try:
+        import h5netcdf  # noqa: F401
+        netcdf_engine = "h5netcdf"
+    except ImportError:
+        netcdf_engine = None
+
+    cache_path = Path(cache_path)
+    if cache_path.exists() and not force_recompute:
+        return xr.open_dataarray(cache_path, engine=netcdf_engine)
+
+    if metric == "trend":
+        field = compute_era5_annual_rainfall_trend(
+            era5_ds, period_start=period_start, period_end=period_end, precip_var=precip_var,
+        )
+    elif metric == "mean":
+        field = compute_era5_annual_mean_rainfall(
+            era5_ds, period_start=period_start, period_end=period_end, precip_var=precip_var,
+        )
+    else:
+        raise ValueError("metric must be 'mean' or 'trend'")
+
+    field = field.load()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    field.to_netcdf(cache_path, engine=netcdf_engine)
+    return field
+
+
 def plot_monthly_rainfall_with_era5_background(
     dict_lon_lat: dict,
-    monthly_data: dict[str, pd.DataFrame],
+    monthly_data: dict[str, pd.DataFrame] | None,
     data_dir: str | Path,
     era5_ds,
     metric: str = "trend",
@@ -1085,52 +1433,71 @@ def plot_monthly_rainfall_with_era5_background(
     figsize: tuple[float, float] = (14, 9),
     label_fontsize: int = 9,
     variable_labels: dict | None = None,
+    *,
+    annual_data: dict[str, pd.DataFrame] | None = None,
+    variable: str = "RAIN",
+    era5_field=None,
+    min_years: int = 2,
 ):
     """
-    Pacific rainfall map with ERA5 EEZ background and CIPSAP RAIN stations.
+    Pacific rainfall map with ERA5 EEZ background and station points.
 
     ``metric`` is ``"mean"`` (multi-year mean annual rainfall) or ``"trend"``
-    (linear trend in mm/decade).
+    (linear trend in mm/decade). Station data is either CIPSAP-style
+    ``monthly_data`` (with a monthly ``"RAIN"`` column, summed to annual
+    internally) or already-annual ``annual_data`` (e.g. the ``total_annual_mm``
+    column from ``compute_regional_rainfall_indicators``) -- provide exactly
+    one, and set ``variable`` to the column name when using ``annual_data``.
+
+    ``era5_field`` lets a caller pass an already-computed field (e.g. loaded
+    from a cache via :func:`load_or_compute_era5_annual_rainfall`) instead of
+    recomputing it from ``era5_ds`` -- pass ``era5_ds=None`` in that case.
     """
     if metric not in {"mean", "trend"}:
         raise ValueError("metric must be 'mean' or 'trend'")
+    if (annual_data is None) == (monthly_data is None):
+        raise ValueError("Provide exactly one of annual_data or monthly_data.")
 
-    variable_labels = variable_labels or {"RAIN": "annual total rainfall on wet days"}
-    label = variable_labels.get("RAIN", "annual total rainfall on wet days")
+    variable_labels = variable_labels or {variable: "annual total rainfall"}
+    label = variable_labels.get(variable, variable)
 
     if metric == "trend":
-        era5_field = compute_era5_annual_rainfall_trend(
-            era5_ds,
-            period_start=period_start,
-            period_end=period_end,
-            precip_var=precip_var,
-        )
+        if era5_field is None:
+            era5_field = compute_era5_annual_rainfall_trend(
+                era5_ds,
+                period_start=period_start,
+                period_end=period_end,
+                precip_var=precip_var,
+            )
         default_cmap = "BrBG"
         default_vmin, default_vmax = -60.0, 60.0
         color_label = "mm / decade"
+        station_source = "CIPSAP stations" if monthly_data is not None else "GHCN stations"
         title = (
             f"Trend in {label.lower()} over {period_start}–{period_end}\n"
-            f"(ERA5 background within EEZs, CIPSAP stations)"
+            f"(ERA5 background within EEZs, {station_source})"
         )
         show_significance = True
     else:
-        era5_field = compute_era5_annual_mean_rainfall(
-            era5_ds,
-            period_start=period_start,
-            period_end=period_end,
-            precip_var=precip_var,
-        )
+        if era5_field is None:
+            era5_field = compute_era5_annual_mean_rainfall(
+                era5_ds,
+                period_start=period_start,
+                period_end=period_end,
+                precip_var=precip_var,
+            )
         default_cmap = "YlGnBu"
         default_vmin, default_vmax = None, None
         color_label = "mm"
+        station_source = "CIPSAP stations" if monthly_data is not None else "GHCN stations"
         title = (
             f"Mean {label.lower()} ({period_start}–{period_end})\n"
-            f"(ERA5 background within EEZs, CIPSAP stations)"
+            f"(ERA5 background within EEZs, {station_source})"
         )
         show_significance = False
 
     config = RegionalMapConfig(
-        variable="RAIN",
+        variable=variable,
         metric=metric,
         period_start=period_start,
         period_end=period_end,
@@ -1138,6 +1505,7 @@ def plot_monthly_rainfall_with_era5_background(
         vmax=vmax if vmax is not None else default_vmax,
         color_label=color_label,
         cmap=cmap or default_cmap,
+        min_years=min_years,
     )
 
     return _plot_era5_field_with_cipsap_stations(
@@ -1146,6 +1514,7 @@ def plot_monthly_rainfall_with_era5_background(
         data_dir,
         era5_field,
         config,
+        annual_data=annual_data,
         variable_labels=variable_labels,
         vmin=vmin if vmin is not None else default_vmin,
         vmax=vmax if vmax is not None else default_vmax,
@@ -1155,46 +1524,12 @@ def plot_monthly_rainfall_with_era5_background(
         show_significance=show_significance,
         figsize=figsize,
         label_fontsize=label_fontsize,
-    )
-
-
-def plot_monthly_rainfall_trend_with_era5_background(
-    dict_lon_lat: dict,
-    monthly_data: dict[str, pd.DataFrame],
-    data_dir: str | Path,
-    era5_ds,
-    period_start: int = 1951,
-    period_end: int = 2020,
-    precip_var: str = "tp",
-    vmin: float = -60,
-    vmax: float = 60,
-    cmap: str = "BrBG",
-    figsize: tuple[float, float] = (14, 9),
-    label_fontsize: int = 9,
-    variable_labels: dict | None = None,
-):
-    """Backwards-compatible wrapper for ``plot_monthly_rainfall_with_era5_background(..., metric='trend')``."""
-    return plot_monthly_rainfall_with_era5_background(
-        dict_lon_lat,
-        monthly_data,
-        data_dir,
-        era5_ds,
-        metric="trend",
-        period_start=period_start,
-        period_end=period_end,
-        precip_var=precip_var,
-        vmin=vmin,
-        vmax=vmax,
-        cmap=cmap,
-        figsize=figsize,
-        label_fontsize=label_fontsize,
-        variable_labels=variable_labels,
     )
 
 
 def plot_monthly_temperature_with_era5_background(
     dict_lon_lat: dict,
-    monthly_data: dict[str, pd.DataFrame],
+    monthly_data: dict[str, pd.DataFrame] | None,
     data_dir: str | Path,
     era5_ds,
     metric: str = "trend",
@@ -1207,52 +1542,71 @@ def plot_monthly_temperature_with_era5_background(
     figsize: tuple[float, float] = (14, 9),
     label_fontsize: int = 9,
     variable_labels: dict | None = None,
+    *,
+    annual_data: dict[str, pd.DataFrame] | None = None,
+    variable: str = "TMEAN",
+    era5_field=None,
+    min_years: int = 2,
 ):
     """
-    Pacific temperature map with ERA5 EEZ background and CIPSAP TMEAN stations.
+    Pacific temperature map with ERA5 EEZ background and station points.
 
     ``metric`` is ``"mean"`` (multi-year mean annual temperature) or ``"trend"``
-    (linear trend in °C/decade).
+    (linear trend in °C/decade). Station data is either CIPSAP-style
+    ``monthly_data`` (with a monthly ``"TMEAN"`` column, averaged to annual
+    internally) or already-annual ``annual_data`` (e.g. the ``tmean_annual``
+    column from ``compute_regional_temperature_indicators``) -- provide exactly
+    one, and set ``variable`` to the column name when using ``annual_data``.
+
+    ``era5_field`` lets a caller pass an already-computed field (e.g. loaded
+    from a cache) instead of recomputing it from ``era5_ds`` -- pass
+    ``era5_ds=None`` in that case.
     """
     if metric not in {"mean", "trend"}:
         raise ValueError("metric must be 'mean' or 'trend'")
+    if (annual_data is None) == (monthly_data is None):
+        raise ValueError("Provide exactly one of annual_data or monthly_data.")
 
-    variable_labels = variable_labels or {"TMEAN": "mean annual air temperature"}
-    label = variable_labels.get("TMEAN", "mean annual air temperature")
+    variable_labels = variable_labels or {variable: "mean annual air temperature"}
+    label = variable_labels.get(variable, variable)
 
     if metric == "trend":
-        era5_field = compute_era5_annual_temperature_trend(
-            era5_ds,
-            period_start=period_start,
-            period_end=period_end,
-            temp_var=temp_var,
-        )
+        if era5_field is None:
+            era5_field = compute_era5_annual_temperature_trend(
+                era5_ds,
+                period_start=period_start,
+                period_end=period_end,
+                temp_var=temp_var,
+            )
         default_cmap = "BrBG"
         default_vmin, default_vmax = -0.5, 0.5
         color_label = "°C / decade"
+        station_source = "CIPSAP stations" if monthly_data is not None else "GHCN stations"
         title = (
             f"Trend in {label.lower()} over {period_start}–{period_end}\n"
-            f"(ERA5 background within EEZs, CIPSAP stations)"
+            f"(ERA5 background within EEZs, {station_source})"
         )
         show_significance = True
     else:
-        era5_field = compute_era5_annual_mean_temperature(
-            era5_ds,
-            period_start=period_start,
-            period_end=period_end,
-            temp_var=temp_var,
-        )
+        if era5_field is None:
+            era5_field = compute_era5_annual_mean_temperature(
+                era5_ds,
+                period_start=period_start,
+                period_end=period_end,
+                temp_var=temp_var,
+            )
         default_cmap = "RdYlBu_r"
         default_vmin, default_vmax = None, None
         color_label = "°C"
+        station_source = "CIPSAP stations" if monthly_data is not None else "GHCN stations"
         title = (
             f"Mean {label.lower()} ({period_start}–{period_end})\n"
-            f"(ERA5 background within EEZs, CIPSAP stations)"
+            f"(ERA5 background within EEZs, {station_source})"
         )
         show_significance = False
 
     config = RegionalMapConfig(
-        variable="TMEAN",
+        variable=variable,
         metric=metric,
         period_start=period_start,
         period_end=period_end,
@@ -1260,6 +1614,7 @@ def plot_monthly_temperature_with_era5_background(
         vmax=vmax if vmax is not None else default_vmax,
         color_label=color_label,
         cmap=cmap or default_cmap,
+        min_years=min_years,
     )
 
     return _plot_era5_field_with_cipsap_stations(
@@ -1268,6 +1623,7 @@ def plot_monthly_temperature_with_era5_background(
         data_dir,
         era5_field,
         config,
+        annual_data=annual_data,
         variable_labels=variable_labels,
         vmin=vmin if vmin is not None else default_vmin,
         vmax=vmax if vmax is not None else default_vmax,
@@ -1280,69 +1636,3 @@ def plot_monthly_temperature_with_era5_background(
     )
 
 
-def plot_monthly_temperature_mean_with_era5_background(
-    dict_lon_lat: dict,
-    monthly_data: dict[str, pd.DataFrame],
-    data_dir: str | Path,
-    era5_ds,
-    period_start: int = 1951,
-    period_end: int = 2020,
-    temp_var: str = "t2m",
-    vmin: float | None = None,
-    vmax: float | None = None,
-    cmap: str = "RdYlBu_r",
-    figsize: tuple[float, float] = (14, 9),
-    label_fontsize: int = 9,
-    variable_labels: dict | None = None,
-):
-    """Backwards-compatible wrapper for ``plot_monthly_temperature_with_era5_background(..., metric='mean')``."""
-    return plot_monthly_temperature_with_era5_background(
-        dict_lon_lat,
-        monthly_data,
-        data_dir,
-        era5_ds,
-        metric="mean",
-        period_start=period_start,
-        period_end=period_end,
-        temp_var=temp_var,
-        vmin=vmin,
-        vmax=vmax,
-        cmap=cmap,
-        figsize=figsize,
-        label_fontsize=label_fontsize,
-        variable_labels=variable_labels,
-    )
-
-
-def plot_monthly_temperature_trend_with_era5_background(
-    dict_lon_lat: dict,
-    monthly_data: dict[str, pd.DataFrame],
-    data_dir: str | Path,
-    era5_ds,
-    period_start: int = 1951,
-    period_end: int = 2020,
-    temp_var: str = "t2m",
-    vmin: float = -0.5,
-    vmax: float = 0.5,
-    cmap: str = "BrBG",
-    figsize: tuple[float, float] = (14, 9),
-    label_fontsize: int = 9,
-    variable_labels: dict | None = None,
-):
-    """Backwards-compatible wrapper for ``plot_monthly_temperature_with_era5_background(..., metric='trend')``."""
-    return plot_monthly_temperature_with_era5_background(
-        dict_lon_lat,
-        monthly_data,
-        data_dir,
-        era5_ds,
-        metric="trend",
-        period_start=period_start,
-        period_end=period_end,
-        temp_var=temp_var,
-        vmin=vmin,
-        vmax=vmax,
-        cmap=cmap,
-        figsize=figsize,
-        label_fontsize=label_fontsize,
-        variable_labels=variable_labels,
-    )
